@@ -1,0 +1,1872 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>메이플 MP·룬 알리미</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/98.css@0.1.21/dist/98.css">
+<style>
+  [hidden] { display: none !important; }
+  body { margin: 0; min-height: 100vh; background: #008080; padding: 16px; box-sizing: border-box; }
+  body, .window, button, select, input, label { font-family: "Pixelated MS Sans Serif", "Gulim", "굴림", "Dotum", sans-serif; font-size: 12px; }
+  .window { max-width: 1200px; margin: 0 auto; }
+  .title-bar-text { font-size: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 8px; }
+  .toolbar .group { display: flex; align-items: center; gap: 6px; }
+  .toolbar .sep { width: 2px; align-self: stretch; border-left: 1px solid #808080; border-right: 1px solid #fff; }
+  .toolbar button { min-width: 88px; }
+  .toolbar button.on { box-shadow: inset -1px -1px #fff, inset 1px 1px #0a0a0a, inset -2px -2px #dfdfdf, inset 2px 2px grey; padding-top: 2px; }
+  #volume { width: 110px; }
+  #stage { background: #000; padding: 0; min-height: 260px; display: grid; place-items: center; overflow: hidden; }
+  #preview { max-width: 100%; max-height: calc(100vh - 150px); width: auto; height: auto; display: block; cursor: crosshair; touch-action: none; }
+  #placeholder { color: #c0c0c0; text-align: center; padding: 48px 16px; line-height: 1.8; }
+  #placeholder .warn { color: #ffff00; }
+  .status-bar { margin-top: 6px; }
+  .status-bar-field { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #st-main { flex: 0 0 200px; }
+  #st-mp.alert { background: #ff0000; color: #fff; }
+  #st-rune.alert { background: #ff00ff; color: #fff; }
+  #st-cpn { flex: 0 0 150px; }
+  #st-lie { flex: 0 0 170px; }
+  #st-lie.alert { background: #ff0000; color: #fff; font-weight: bold; }
+  #st-cpn.alert { background: #ffa500; color: #000; }
+  #st-res { flex: 0 0 110px; text-align: center; }
+  #video { position: fixed; left: 0; bottom: 0; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+  #alarm { position: fixed; left: 50%; top: 30%; transform: translateX(-50%); width: min(340px, calc(100vw - 32px)); z-index: 10; }
+  #alarm .window-body { display: flex; gap: 12px; align-items: center; }
+  #alarm .icon { font-size: 32px; line-height: 1; }
+  #alarm .msg { flex: 1; }
+  #alarm .btns { text-align: center; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<div class="window">
+  <div class="title-bar">
+    <div class="title-bar-text">메이플 MP·룬 알리미</div>
+    <div class="title-bar-controls">
+      <button aria-label="Minimize" tabindex="-1"></button>
+      <button aria-label="Maximize" tabindex="-1"></button>
+      <button aria-label="Close" tabindex="-1"></button>
+    </div>
+  </div>
+  <div class="window-body">
+    <div class="toolbar">
+      <div class="group">
+        <button id="btn-capture">화면 공유</button>
+        <button id="btn-monitor" disabled>감시 시작</button>
+        <button id="btn-auto" hidden title="직접 지정한 MP 영역을 지우고 자동 인식으로 돌아갑니다">자동 인식으로</button>
+      </div>
+      <div class="sep"></div>
+      <div class="group">
+        <label for="interval">검사 주기</label>
+        <select id="interval">
+          <option value="250">0.25초</option>
+          <option value="500">0.5초</option>
+          <option value="1000">1초</option>
+          <option value="2000">2초</option>
+        </select>
+      </div>
+      <div class="group">
+        <input type="checkbox" id="use-mp"><label for="use-mp">MP</label>
+        <input type="checkbox" id="use-rune"><label for="use-rune">룬</label>
+        <input type="checkbox" id="use-ld"><label for="use-ld" title="거짓말 탐지기(별 모양 안내·우측 하단 안내 패널)가 뜨면 알림">탐지기</label>
+        <input type="checkbox" id="use-cpn"><label for="use-cpn" title="경험치 쿠폰(도핑) 효과가 끝났다는 화면 문구를 MP 검사 주기마다 확인">쿠폰</label>
+        <select id="rune-cd" title="룬이 사라진 뒤 다음 룬까지의 시간">
+          <option value="10">10분</option>
+          <option value="15">15분</option>
+        </select>
+      </div>
+      <div class="group">
+        <label for="volume">볼륨</label>
+        <input id="volume" type="range" min="0" max="1" step="0.05">
+      </div>
+      <div class="sep"></div>
+      <div class="group">
+        <button id="btn-clean" title="윈도우 탐색기를 다시 시작하는 clean.bat 파일을 내려받습니다">렉 제거</button>
+      </div>
+    </div>
+
+    <div id="stage" class="sunken-panel">
+      <div id="placeholder">
+        <p>[화면 공유]를 눌러 메이플스토리 창을 선택하세요.</p>
+        <p>공유된 화면은 이 브라우저 안에서만 분석됩니다.</p>
+      </div>
+      <canvas id="preview" hidden></canvas>
+    </div>
+
+    <div class="status-bar">
+      <p class="status-bar-field" id="st-main">준비</p>
+      <p class="status-bar-field" id="st-mp">MP 바 미지정</p>
+      <p class="status-bar-field" id="st-rune">룬 -</p>
+      <p class="status-bar-field" id="st-cpn">쿠폰 -</p>
+      <p class="status-bar-field" id="st-lie">탐지기 -</p>
+      <p class="status-bar-field" id="st-res">-</p>
+    </div>
+  </div>
+</div>
+
+<div id="alarm" class="window" hidden>
+  <div class="title-bar">
+    <div class="title-bar-text">경고</div>
+    <div class="title-bar-controls"><button aria-label="Close" id="alarm-x"></button></div>
+  </div>
+  <div class="window-body">
+    <div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <span class="icon">⚠️</span>
+        <span class="msg" id="alarm-msg"></span>
+      </div>
+      <div class="btns"><button id="alarm-ok" style="min-width:80px">확인</button></div>
+    </div>
+  </div>
+</div>
+
+<video id="video" muted playsinline></video>
+
+<script>
+"use strict";
+
+const $ = s => document.querySelector(s);
+
+const video = $("#video");
+
+const pv = $("#preview");
+
+const pctx = pv.getContext("2d");
+
+const work = document.createElement("canvas");
+
+const wctx = work.getContext("2d", {
+  willReadFrequently: true
+});
+
+const INTERVALS = [ 250, 500, 1e3, 2e3 ];
+
+const CAPTURE_FPS = 2;
+
+const RUNE_CDS = [ 10, 15 ];
+
+const HOLD_SEC = 5;
+
+function readConfig() {
+  const q = new URLSearchParams(location.search);
+  const vol = Number(q.get("vol"));
+  const legacyAuto = q.has("src") || q.has("hold") || q.has("repeat");
+  const r = legacyAuto ? [] : (q.get("mp") || "").split(",").map(Number);
+  return {
+    mp: r.length === 4 && r.every(v => Number.isInteger(v) && v >= 0) && r[2] > 0 && r[3] > 0 ? {
+      x: r[0],
+      y: r[1],
+      w: r[2],
+      h: r[3]
+    } : null,
+    iv: INTERVALS.includes(Number(q.get("iv"))) ? Number(q.get("iv")) : 500,
+    vol: q.has("vol") && Number.isFinite(vol) ? Math.min(1, Math.max(0, vol)) : .6,
+    mpOn: q.get("mpw") !== "0",
+    runeOn: q.get("rune") !== "0",
+    cpnOn: q.get("cpn") !== "0",
+    ldOn: q.get("ld") !== "0",
+    rcd: RUNE_CDS.includes(Number(q.get("rcd"))) ? Number(q.get("rcd")) : 15
+  };
+}
+
+const cfg = readConfig();
+
+function writeConfig() {
+  const p = [];
+  if (cfg.mp) p.push(`mp=${cfg.mp.x},${cfg.mp.y},${cfg.mp.w},${cfg.mp.h}`);
+  p.push(`iv=${cfg.iv}`, `vol=${cfg.vol}`, `rcd=${cfg.rcd}`);
+  if (!cfg.mpOn) p.push("mpw=0");
+  if (!cfg.runeOn) p.push("rune=0");
+  if (!cfg.cpnOn) p.push("cpn=0");
+  if (!cfg.ldOn) p.push("ld=0");
+  history.replaceState(null, "", location.pathname + "?" + p.join("&") + location.hash);
+}
+
+let stream = null;
+
+let monitoring = false;
+
+let audioCtx = null;
+
+let autoMp = null;
+
+const mp = {
+  changedAt: null,
+  mask: null,
+  tip: null,
+  lastCond: false,
+  fired: false,
+  hiddenSince: null,
+  live: null,
+  alarm: false
+};
+
+function resetMp() {
+  Object.assign(mp, {
+    changedAt: null,
+    mask: null,
+    tip: null,
+    lastCond: false,
+    fired: false,
+    hiddenSince: null,
+    live: null,
+    alarm: false
+  });
+  hideAlarm("mp");
+}
+
+function mpRegion() {
+  return cfg.mp || autoMp;
+}
+
+function hasFrame() {
+  return !!stream && video.videoWidth > 0;
+}
+
+async function startCapture() {
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        frameRate: {
+          ideal: CAPTURE_FPS,
+          max: CAPTURE_FPS
+        },
+        cursor: "never"
+      },
+      audio: false
+    });
+  } catch (e) {
+    if (e.name !== "NotAllowedError") setMain("화면 공유 실패: " + e.message);
+    return;
+  }
+  video.srcObject = stream;
+  stream.getVideoTracks()[0].addEventListener("ended", stopCapture);
+  await video.play().catch(() => {});
+  $("#placeholder").hidden = true;
+  pv.hidden = false;
+  $("#btn-capture").textContent = "공유 중지";
+  $("#btn-capture").classList.add("on");
+  setDetectTicker(1e3);
+  updateUi();
+}
+
+function stopCapture() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  video.srcObject = null;
+  setMonitoring(false);
+  setDetectTicker(0);
+  autoMp = null;
+  runeMap = null;
+  $("#placeholder").hidden = false;
+  pv.hidden = true;
+  $("#btn-capture").textContent = "화면 공유";
+  $("#btn-capture").classList.remove("on");
+  updateUi();
+}
+
+function workerTimer(onTick) {
+  const w = new Worker(URL.createObjectURL(new Blob([ "let t=null;onmessage=e=>{clearInterval(t);t=null;if(e.data>0)t=setInterval(()=>postMessage(0),e.data)}" ], {
+    type: "text/javascript"
+  })));
+  w.onmessage = onTick;
+  return ms => w.postMessage(ms);
+}
+
+const setTicker = workerTimer(tick);
+
+const setDetectTicker = workerTimer(detectTick);
+
+function detectTick() {
+  if (!hasFrame() || cfg.mp || !cfg.mpOn) return;
+  const size = `${video.videoWidth}x${video.videoHeight}`;
+  const lost = mp.hiddenSince != null && performance.now() - mp.hiddenSince > 1e4;
+  if (autoMp && autoMp.size === size && !lost) return;
+  const b = findMpBar(grabFrame())[0];
+  if (b && b.hp >= .2 && mpTextMask(cropFull(b)).count >= MP_TEXT_MIN) {
+    const moved = !autoMp || autoMp.x !== b.x || autoMp.y !== b.y || Math.abs(autoMp.w - b.w) > 3 || autoMp.h !== b.h;
+    if (moved) {
+      autoMp = {
+        x: b.x,
+        y: b.y,
+        w: b.w,
+        h: b.h,
+        size: size
+      };
+      resetMp();
+    } else mp.hiddenSince = null;
+  } else if (autoMp && autoMp.size !== size) {
+    autoMp = null;
+    resetMp();
+  }
+  updateUi();
+}
+
+function setMonitoring(on) {
+  monitoring = !!(on && hasFrame());
+  setTicker(monitoring && (cfg.mpOn || cfg.cpnOn) ? cfg.iv : 0);
+  setRuneTicker(monitoring && cfg.runeOn ? RUNE_IV : 0);
+  setLieTicker(monitoring && cfg.ldOn ? LIE_IV : 0);
+  resetMp();
+  resetRune();
+  resetCoupon();
+  resetLie();
+  const b = $("#btn-monitor");
+  b.textContent = monitoring ? "감시 중지" : "감시 시작";
+  b.classList.toggle("on", monitoring);
+  updateUi();
+}
+
+function isMpBlue(r, g, b) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  if (max < 110 || d / max < .45 || r === max) return false;
+  const hue = b === max ? 240 + 60 * (r - g) / d : 120 + 60 * (b - r) / d;
+  return hue >= 172 && hue <= 245;
+}
+
+function grabFrame() {
+  const W = video.videoWidth, H = video.videoHeight;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const cx = c.getContext("2d", {
+    willReadFrequently: true
+  });
+  cx.drawImage(video, 0, 0);
+  return {
+    W: W,
+    H: H,
+    data: cx.getImageData(0, 0, W, H).data
+  };
+}
+
+function blueBoxes({W: W, H: H, data: data}, minRun) {
+  const boxes = [];
+  let open = [];
+  for (let y = 0; y < H; y++) {
+    const next = [];
+    let start = -1, last = -1, px = 0;
+    for (let x = 0; x <= W; x++) {
+      const i = (y * W + x) * 4;
+      if (x < W && isMpBlue(data[i], data[i + 1], data[i + 2])) {
+        if (start < 0) {
+          start = x;
+          px = 0;
+        }
+        last = x;
+        px++;
+        continue;
+      }
+      if (start < 0 || x - last <= 2 && x < W) continue;
+      if (last - start + 1 >= minRun) {
+        const box = open.find(o => !o.taken && Math.min(o.x1, last) - Math.max(o.x0, start) >= .5 * Math.min(o.x1 - o.x0, last - start));
+        if (box) {
+          box.taken = true;
+          box.x0 = Math.min(box.x0, start);
+          box.x1 = Math.max(box.x1, last);
+          box.y1 = y;
+          box.px += px;
+          next.push(box);
+        } else {
+          const nb = {
+            x0: start,
+            x1: last,
+            y0: y,
+            y1: y,
+            px: px,
+            taken: true
+          };
+          boxes.push(nb);
+          next.push(nb);
+        }
+      }
+      start = -1;
+    }
+    for (const b of next) b.taken = false;
+    open = next;
+  }
+  return boxes.map(b => ({
+    x: b.x0,
+    y: b.y0,
+    w: b.x1 - b.x0 + 1,
+    h: b.y1 - b.y0 + 1,
+    px: b.px
+  }));
+}
+
+function mergePieces(boxes, maxGap) {
+  boxes.sort((a, b) => a.x - b.x);
+  const out = [];
+  for (const b of boxes) {
+    const m = out.find(o => {
+      const ov = Math.min(o.y + o.h, b.y + b.h) - Math.max(o.y, b.y);
+      return ov >= .6 * Math.min(o.h, b.h) && b.x - (o.x + o.w) <= maxGap && Math.abs(o.h - b.h) <= Math.max(3, .5 * Math.max(o.h, b.h));
+    });
+    if (!m) {
+      out.push({
+        ...b
+      });
+      continue;
+    }
+    const x1 = Math.max(m.x + m.w, b.x + b.w), y0 = Math.min(m.y, b.y), y1 = Math.max(m.y + m.h, b.y + b.h);
+    m.x = Math.min(m.x, b.x);
+    m.w = x1 - m.x;
+    m.y = y0;
+    m.h = y1 - y0;
+    m.px += b.px;
+  }
+  return out;
+}
+
+function barPieces(frame, minRun) {
+  const {W: W, H: H} = frame;
+  const thin = blueBoxes(frame, minRun).filter(b => b.h >= 2 && b.h <= Math.max(8, H * .06));
+  return mergePieces(thin, Math.max(40, W * .08)).map(b => ({
+    ...b,
+    density: b.px / (b.w * b.h)
+  }));
+}
+
+function isHpRed(r, g, b) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  if (max < 120 || r !== max || d / max < .4) return false;
+  const hue = (360 + 60 * (g - b) / d) % 360;
+  return hue >= 320 || hue <= 25;
+}
+
+const pixAt = ({W: W, data: data}, x, y) => {
+  const i = (y * W + x) * 4;
+  return [ data[i], data[i + 1], data[i + 2] ];
+};
+
+function edgeClean(frame, b) {
+  let ok = 0, n = 0;
+  for (let k = 0; k < 24; k++) {
+    const x = Math.round(b.x + (b.w - 1) * k / 23);
+    const yA = b.y - 3, yB = b.y + b.h + 2;
+    if (yA < 0 || yB >= frame.H) continue;
+    n++;
+    if (!isMpBlue(...pixAt(frame, x, yA)) && !isMpBlue(...pixAt(frame, x, yB))) ok++;
+  }
+  return n ? ok / n : 0;
+}
+
+function hpAbove(frame, b) {
+  const y0 = Math.max(0, Math.round(b.y - b.h * 1.8)), y1 = Math.round(b.y - b.h * .2);
+  const x1 = Math.round(b.x + b.w * .3);
+  let red = 0, n = 0;
+  for (let y = y0; y < y1; y += 2) for (let x = b.x; x < x1; x += 2) {
+    n++;
+    if (isHpRed(...pixAt(frame, x, y))) red++;
+  }
+  return n ? red / n : 0;
+}
+
+function isMpFill(r, g, b) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  if (max < 50 || d / max < .35 || r === max) return false;
+  const hue = b === max ? 240 + 60 * (r - g) / d : 120 + 60 * (b - r) / d;
+  return hue >= 168 && hue <= 250;
+}
+
+const isWhiteText = (r, g, b) => {
+  const max = Math.max(r, g, b);
+  return max >= 200 && (max - Math.min(r, g, b)) / max < .25;
+};
+
+function trackWidth(frame, b) {
+  let best = b.w;
+  for (const fy of [ .12, .88 ]) {
+    const y = Math.round(b.y + (b.h - 1) * fy);
+    let end = b.x + b.w, ema = 0, count = 0, miss = 0;
+    for (let x = end; x < frame.W && x < b.x + frame.W * .5; x++) {
+      const p = pixAt(frame, x, y);
+      const max = Math.max(...p), sat = (max - Math.min(...p)) / Math.max(1, max);
+      if (isMpFill(...p)) {
+        end = x + 1;
+        miss = 0;
+        continue;
+      }
+      if (isWhiteText(...p)) continue;
+      if (sat < .3 && max >= 35) {
+        if (count >= 3 && ema - max > Math.max(20, ema * .22)) break;
+        if (count >= 3 && max - ema > Math.max(30, ema * .3)) break;
+        ema = count ? ema * .7 + max * .3 : max;
+        end = x + 1;
+        count++;
+        miss = 0;
+        continue;
+      }
+      if (++miss > 2) break;
+    }
+    best = Math.max(best, end - b.x);
+  }
+  return best;
+}
+
+function textWidth(frame, b) {
+  const y0 = b.y + Math.round(b.h * .15), y1 = b.y + Math.round(b.h * .85);
+  const xEnd = Math.min(frame.W, b.x + Math.round(frame.W * .4));
+  const cols = [];
+  for (let x = b.x; x < xEnd; x++) {
+    let n = 0;
+    for (let y = y0; y < y1; y++) if (isWhiteText(...pixAt(frame, x, y))) n++;
+    if (n >= 2) cols.push(x);
+  }
+  const gap = Math.max(8, Math.round(b.h * .65));
+  const groups = [];
+  for (const x of cols) {
+    const g = groups[groups.length - 1];
+    if (g && x - g.x1 <= gap) g.x1 = x; else groups.push({
+      x0: x,
+      x1: x
+    });
+  }
+  const t = groups.find(g => {
+    const w = g.x1 - g.x0 + 1;
+    return w >= b.h * 2.5 && w <= b.h * 10;
+  });
+  return t ? Math.round(((t.x0 + t.x1) / 2 - b.x) * 2 + 1) : 0;
+}
+
+function measureFill(frame, r) {
+  const y0 = r.y + Math.round(r.h * .15), y1 = r.y + Math.round(r.h * .85);
+  let tip = -1;
+  for (let x = r.x; x < r.x + r.w && x < frame.W; x++) {
+    let n = 0, t = 0;
+    for (let y = y0; y < y1; y++, t++) if (isMpFill(...pixAt(frame, x, y))) n++;
+    if (n >= t * .3) tip = x;
+  }
+  return tip < 0 ? 0 : (tip - r.x + 1) / r.w;
+}
+
+function withFullWidth(frame, b) {
+  b.fillW = b.w;
+  const tw = trackWidth(frame, b), xw = textWidth(frame, b);
+  b.w = xw >= b.fillW && Math.abs(xw - tw) / xw > .06 ? xw : tw;
+  b.widthBy = {
+    track: tw,
+    text: xw
+  };
+  b.fill = measureFill(frame, b);
+  return b;
+}
+
+function findMpBar(frame) {
+  const {W: W, H: H} = frame;
+  const cands = barPieces(frame, Math.max(12, Math.round(W * .01))).filter(b => b.h >= 3 && b.w >= W * .03 && b.w / b.h >= 4 && b.density >= .45);
+  for (const c of cands) {
+    const cx = (c.x + c.w / 2) / W, cy = (c.y + c.h / 2) / H;
+    c.edge = edgeClean(frame, c);
+    c.hp = hpAbove(frame, c);
+    const loc = cx >= .2 && cx <= .8 && cy >= .88 ? 5 : cy >= .6 ? 2 : 1;
+    c.score = Math.sqrt(c.w * c.h) * c.density * loc * (.5 + c.edge) * (1 + 10 * Math.min(1, c.hp * 2));
+  }
+  cands.sort((a, b) => b.score - a.score);
+  if (cands[0]) withFullWidth(frame, cands[0]);
+  return cands;
+}
+
+function cropFull(r) {
+  work.width = r.w;
+  work.height = r.h;
+  wctx.drawImage(video, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+  return {
+    W: r.w,
+    H: r.h,
+    data: wctx.getImageData(0, 0, r.w, r.h).data
+  };
+}
+
+function mpTextMask(fr) {
+  const x0 = Math.round(fr.W * .25), x1 = Math.round(fr.W * .75);
+  const y0 = Math.round(fr.H * .1), y1 = Math.round(fr.H * .9);
+  const m = new Uint8Array((x1 - x0) * (y1 - y0));
+  let k = 0, count = 0;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++, k++) {
+    if (isWhiteText(...pixAt(fr, x, y))) {
+      m[k] = 1;
+      count++;
+    }
+  }
+  return {
+    m: m,
+    count: count
+  };
+}
+
+const MP_TEXT_MIN = 25;
+
+const MP_TEXT_DIFF = 2;
+
+const MP_TIP_DIFF = 2;
+
+function evaluateMp(r, now) {
+  const fr = cropFull(r);
+  const fill = measureFill(fr, {
+    x: 0,
+    y: 0,
+    w: r.w,
+    h: r.h
+  });
+  const {m: m, count: count} = mpTextMask(fr);
+  if (count < MP_TEXT_MIN) {
+    mp.hiddenSince ??= now;
+    return {
+      fill: null,
+      hidden: true,
+      cond: mp.lastCond
+    };
+  }
+  mp.hiddenSince = null;
+  const tip = Math.round(fill * r.w);
+  let changed = false;
+  if (mp.mask && mp.mask.length === m.length) {
+    let diff = 0;
+    for (let i = 0; i < m.length; i++) if (m[i] !== mp.mask[i]) diff++;
+    changed = diff >= MP_TEXT_DIFF || Math.abs(tip - mp.tip) >= MP_TIP_DIFF;
+  } else {
+    mp.changedAt = now;
+  }
+  mp.mask = m;
+  mp.tip = tip;
+  if (changed) mp.changedAt = now;
+  mp.lastCond = !changed && mp.changedAt !== now;
+  return {
+    fill: fill,
+    hidden: false,
+    cond: mp.lastCond
+  };
+}
+
+function tick() {
+  const r = mpRegion();
+  if (!monitoring || !hasFrame()) {
+    updateUi();
+    return;
+  }
+  if (cfg.cpnOn) couponTick();
+  if (!cfg.mpOn || !r) {
+    updateUi();
+    return;
+  }
+  const now = performance.now();
+  let res;
+  try {
+    res = evaluateMp(r, now);
+  } catch (e) {
+    res = {
+      fill: null,
+      error: e.message,
+      cond: false
+    };
+  }
+  mp.live = res;
+  const stillMs = mp.changedAt == null ? 0 : now - mp.changedAt;
+  if (res.cond && stillMs >= HOLD_SEC * 1e3) {
+    if (!mp.fired) {
+      fire(stillMs);
+      mp.fired = true;
+    }
+  } else if (!res.cond) {
+    mp.fired = false;
+    if (mp.alarm) hideAlarm("mp");
+  }
+  updateUi();
+}
+
+const RUNE_IV = 1e3;
+
+const RUNE_SEARCH = {
+  w: .5,
+  h: .6
+};
+
+const RUNE_REPEAT_MS = 3e3;
+
+const RUNE_GONE_CHECKS = 2;
+
+let runeMap = null;
+
+const rune = {
+  map: null,
+  at: null,
+  visible: false,
+  misses: 0,
+  lastAlertAt: 0,
+  muted: false,
+  clearedAt: null,
+  mapLostSince: null,
+  error: null
+};
+
+function resetRune() {
+  Object.assign(rune, {
+    map: null,
+    at: null,
+    visible: false,
+    misses: 0,
+    lastAlertAt: 0,
+    muted: false,
+    mapLostSince: null,
+    error: null
+  });
+  hideAlarm("rune");
+}
+
+const rwork = document.createElement("canvas");
+
+const rctx = rwork.getContext("2d", {
+  willReadFrequently: true
+});
+
+function grabRect(x, y, w, h) {
+  if (rwork.width !== w || rwork.height !== h) {
+    rwork.width = w;
+    rwork.height = h;
+  }
+  rctx.drawImage(video, x, y, w, h, 0, 0, w, h);
+  return {
+    W: w,
+    H: h,
+    data: rctx.getImageData(0, 0, w, h).data
+  };
+}
+
+const MM_MIN_W = 60, MM_MIN_H = 40;
+
+const MM_GAP = 3;
+
+const mmWhite = (d, i) => {
+  const r = d[i], g = d[i + 1], b = d[i + 2];
+  const mn = Math.min(r, g, b), mx = Math.max(r, g, b);
+  return mn >= 175 && mx - mn <= 35;
+};
+
+function findMinimap(fr) {
+  const {W: W, H: H, data: data} = fr;
+  const wm = new Uint8Array(W * H);
+  for (let i = 0, p = 0; p < W * H; p++, i += 4) wm[p] = mmWhite(data, i) ? 1 : 0;
+  const at = (x, y) => x >= 0 && y >= 0 && x < W && y < H ? wm[y * W + x] : 0;
+  const rowFrac = (y, x0, x1) => {
+    let n = 0;
+    for (let x = x0; x <= x1; x++) n += at(x, y);
+    return n / (x1 - x0 + 1);
+  };
+  const colFrac = (x, y0, y1) => {
+    let n = 0;
+    for (let y = y0; y <= y1; y++) n += at(x, y);
+    return n / (y1 - y0 + 1);
+  };
+  const segs = [];
+  for (let y = 0; y < H; y++) {
+    let s = -1, last = -1;
+    for (let x = 0; x <= W; x++) {
+      if (x < W && wm[y * W + x]) {
+        if (s < 0 || x - last > MM_GAP + 1) {
+          if (s >= 0 && last - s + 1 >= MM_MIN_W) segs.push({
+            y: y,
+            x0: s,
+            x1: last
+          });
+          s = x;
+        }
+        last = x;
+      }
+    }
+    if (s >= 0 && last - s + 1 >= MM_MIN_W) segs.push({
+      y: y,
+      x0: s,
+      x1: last
+    });
+  }
+  const edge = (frac, c, lo, hi) => {
+    const ok = k => frac(k) >= .6;
+    let s = null;
+    for (let d = 0; d <= Math.max(c - lo, hi - c) && s == null; d++) {
+      if (c - d >= lo && ok(c - d)) s = c - d; else if (c + d <= hi && ok(c + d)) s = c + d;
+    }
+    if (s == null) return null;
+    let a = s, b = s;
+    while (a - 1 >= lo && ok(a - 1)) a--;
+    while (b + 1 <= hi && ok(b + 1)) b++;
+    return b - a + 1 <= 6 ? {
+      a: a,
+      b: b
+    } : null;
+  };
+  let best = null;
+  for (let i = 0; i < segs.length; i++) {
+    const t = segs[i];
+    for (let j = i + 1; j < segs.length; j++) {
+      const u = segs[j];
+      if (u.y - t.y < MM_MIN_H || Math.abs(u.x0 - t.x0) > 6 || Math.abs(u.x1 - t.x1) > 6) continue;
+      const x0 = Math.min(t.x0, u.x0), x1 = Math.max(t.x1, u.x1);
+      if (best && (x1 - x0) * (u.y - t.y) <= best.w * best.h) continue;
+      const cx0 = x0 + 8, cx1 = x1 - 8;
+      const top = edge(y => rowFrac(y, cx0, cx1), t.y, t.y - 4, t.y + 4);
+      const bot = edge(y => rowFrac(y, cx0, cx1), u.y, u.y - 4, u.y + 4);
+      if (!top || !bot || bot.a - top.b < MM_MIN_H) continue;
+      const cy0 = top.b + 8, cy1 = bot.a - 8;
+      const left = edge(x => colFrac(x, cy0, cy1), x0, x0 - 8, x0 + 6);
+      const right = edge(x => colFrac(x, cy0, cy1), x1, x1 - 6, x1 + 8);
+      if (!left || !right || right.a - left.b < MM_MIN_W) continue;
+      const outside = [ rowFrac(top.a - 2, cx0, cx1), rowFrac(bot.b + 2, cx0, cx1), colFrac(left.a - 2, cy0, cy1), colFrac(right.b + 2, cy0, cy1) ];
+      if (outside.some(f => f > .3)) continue;
+      best = {
+        x: left.b + 1,
+        y: top.b + 1,
+        w: right.a - left.b - 1,
+        h: bot.a - top.b - 1,
+        border: {
+          x: left.a,
+          y: top.a,
+          w: right.b - left.a + 1,
+          h: bot.b - top.a + 1
+        }
+      };
+    }
+  }
+  return best;
+}
+
+const RUNE_MIN = 7, RUNE_MAX = 26;
+
+const RUNE_SYM = .6;
+
+const runePurple = (r, g, b) => {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  if (mx < 140 || mx - mn < 60 || g !== mn) return false;
+  const h = mx === b ? 240 + 60 * (r - g) / (mx - mn) : 360 - 60 * (b - g) / (mx - mn);
+  return h >= 255 && h <= 330;
+};
+
+function runeBlobs(m, W, H) {
+  const seen = new Uint8Array(W * H), stack = [], out = [];
+  for (let p0 = 0; p0 < W * H; p0++) {
+    if (!m[p0] || seen[p0]) continue;
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    const pts = [];
+    seen[p0] = 1;
+    stack.push(p0);
+    while (stack.length) {
+      const p = stack.pop(), x = p % W, y = (p - x) / W;
+      pts.push(p);
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const q = ny * W + nx;
+        if (m[q] && !seen[q]) {
+          seen[q] = 1;
+          stack.push(q);
+        }
+      }
+    }
+    out.push({
+      pts: pts,
+      x: x0,
+      y: y0,
+      w: x1 - x0 + 1,
+      h: y1 - y0 + 1
+    });
+  }
+  return out;
+}
+
+function runeShape(bl, W) {
+  const {pts: pts, x: bx, y: by, w: w, h: h} = bl;
+  if (w < RUNE_MIN || h < RUNE_MIN || w > RUNE_MAX || h > RUNE_MAX) return 0;
+  if (Math.max(w, h) / Math.min(w, h) > 1.35 || pts.length < .25 * w * h) return 0;
+  const box = new Uint8Array(w * h);
+  for (const p of pts) {
+    const x = p % W, y = (p - x) / W;
+    box[(y - by) * w + (x - bx)] = 1;
+  }
+  let lrI = 0, lrU = 0, udI = 0, udU = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const v = box[y * w + x], lr = box[y * w + (w - 1 - x)], ud = box[(h - 1 - y) * w + x];
+    lrI += v & lr;
+    lrU += v | lr;
+    udI += v & ud;
+    udU += v | ud;
+  }
+  const sym = Math.min(lrI / lrU, udI / udU);
+  return sym >= RUNE_SYM ? sym : 0;
+}
+
+function findRune(fr) {
+  const {W: W, H: H, data: data} = fr;
+  const m = new Uint8Array(W * H);
+  for (let i = 0, p = 0; p < W * H; p++, i += 4) m[p] = runePurple(data[i], data[i + 1], data[i + 2]) ? 1 : 0;
+  let best = null;
+  const consider = bl => {
+    const sym = runeShape(bl, W);
+    if (sym && (!best || sym > best.sym)) best = {
+      sym: sym,
+      box: {
+        x: bl.x,
+        y: bl.y,
+        w: bl.w,
+        h: bl.h
+      }
+    };
+    return sym > 0;
+  };
+  const sub = new Uint8Array(W * H);
+  for (const bl of runeBlobs(m, W, H)) {
+    if (consider(bl) || bl.pts.length < 20 || bl.pts.length > 1500) continue;
+    const hist = new Map;
+    for (const p of bl.pts) {
+      const i = p * 4, k = data[i] >> 4 << 8 | data[i + 1] >> 4 << 4 | data[i + 2] >> 4;
+      hist.set(k, (hist.get(k) || 0) + 1);
+    }
+    let mode = 0, cnt = -1;
+    for (const [k, c] of hist) if (c > cnt) {
+      mode = k;
+      cnt = c;
+    }
+    let sr = 0, sg = 0, sb = 0, sn = 0;
+    for (const p of bl.pts) {
+      const i = p * 4;
+      if ((data[i] >> 4 << 8 | data[i + 1] >> 4 << 4 | data[i + 2] >> 4) === mode) {
+        sr += data[i];
+        sg += data[i + 1];
+        sb += data[i + 2];
+        sn++;
+      }
+    }
+    sr /= sn;
+    sg /= sn;
+    sb /= sn;
+    for (const p of bl.pts) {
+      const i = p * 4;
+      sub[p] = Math.abs(data[i] - sr) + Math.abs(data[i + 1] - sg) + Math.abs(data[i + 2] - sb) <= 60 ? 1 : 0;
+    }
+    const w = bl.w, h = bl.h, sm = new Uint8Array(w * h);
+    for (const p of bl.pts) {
+      const x = p % W, y = (p - x) / W;
+      sm[(y - bl.y) * w + (x - bl.x)] = sub[p];
+      sub[p] = 0;
+    }
+    for (const s of runeBlobs(sm, w, h)) {
+      const pts = s.pts.map(q => {
+        const x = q % w, y = (q - x) / w;
+        return (y + bl.y) * W + (x + bl.x);
+      });
+      consider({
+        pts: pts,
+        x: s.x + bl.x,
+        y: s.y + bl.y,
+        w: s.w,
+        h: s.h
+      });
+    }
+  }
+  return best ? {
+    found: true,
+    box: best.box
+  } : {
+    found: false,
+    box: null
+  };
+}
+
+function detectRune() {
+  if (!runeMap) {
+    const sw = Math.max(1, Math.round(video.videoWidth * RUNE_SEARCH.w)), sh = Math.max(1, Math.round(video.videoHeight * RUNE_SEARCH.h));
+    runeMap = findMinimap(grabRect(0, 0, sw, sh));
+    if (!runeMap) return {
+      map: null,
+      at: null
+    };
+  }
+  const map = runeMap;
+  const {found: found, box: box} = findRune(grabRect(map.x, map.y, map.w, map.h));
+  return {
+    map: map,
+    at: found && box ? {
+      x: map.x + box.x,
+      y: map.y + box.y,
+      w: box.w,
+      h: box.h
+    } : null
+  };
+}
+
+function runeTick() {
+  if (!monitoring || !cfg.runeOn || !hasFrame()) {
+    updateUi();
+    return;
+  }
+  const now = performance.now();
+  let res;
+  try {
+    res = detectRune();
+    rune.error = null;
+  } catch (e) {
+    rune.error = e.message;
+    updateUi();
+    return;
+  }
+  rune.map = res.map;
+  if (!res.map) {
+    rune.mapLostSince ??= now;
+    updateUi();
+    return;
+  }
+  rune.mapLostSince = null;
+  rune.at = res.at;
+  if (res.at) {
+    rune.misses = 0;
+    if (!rune.visible) {
+      rune.visible = true;
+      rune.muted = false;
+      rune.lastAlertAt = 0;
+    }
+    if (!rune.muted && now - rune.lastAlertAt >= RUNE_REPEAT_MS) {
+      rune.lastAlertAt = now;
+      runeBeep();
+      flashTitle("룬 등장");
+      showAlarm("rune", "미니맵에 룬이 나타났습니다.");
+    }
+  } else if (rune.visible && ++rune.misses >= RUNE_GONE_CHECKS) {
+    rune.visible = false;
+    rune.misses = 0;
+    rune.clearedAt = Date.now();
+    hideAlarm("rune");
+  }
+  updateUi();
+}
+
+const setRuneTicker = workerTimer(runeTick);
+
+function runeCountdown() {
+  if (rune.clearedAt == null) return null;
+  return Math.max(0, rune.clearedAt + cfg.rcd * 6e4 - Date.now());
+}
+
+const mmss = ms => {
+  const s = Math.ceil(ms / 1e3);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+const isWhiteInk = (r, g, b) => {
+  const mn = Math.min(r, g, b);
+  return mn >= 200 && Math.max(r, g, b) - mn <= 40;
+};
+
+const isOrangeInk = (r, g, b) => r >= 180 && r >= g && g >= b && r - b >= .45 * r && g - b >= .5 * (r - b) && g - b <= .92 * (r - b);
+
+function tmplBits(t) {
+  if (t.bits) return t.bits;
+  const bin = atob(t.b64), m = new Uint8Array(t.w * t.h);
+  for (let k = 0; k < t.w * t.h; k++) m[k] = bin.charCodeAt(k >> 3) >> (k & 7) & 1;
+  return t.bits = m;
+}
+
+function tmplHalf(t) {
+  if (t.half) return t.half;
+  const m = tmplBits(t), w = t.w + 1 >> 1, h = t.h + 1 >> 1, bits = new Uint8Array(w * h);
+  for (let y = 0; y < t.h; y++) for (let x = 0; x < t.w; x++) if (m[y * t.w + x]) bits[(y >> 1) * w + (x >> 1)] = 1;
+  return t.half = {
+    w: w,
+    h: h,
+    bits: bits
+  };
+}
+
+function tmplPoints(t) {
+  if (t.pts) return t.pts;
+  const {w: w, h: h} = t, m = tmplBits(t);
+  const near = (x, y) => {
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx >= 0 && yy >= 0 && xx < w && yy < h && m[yy * w + xx]) return true;
+    }
+    return false;
+  };
+  const on = [], off = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) (m[y * w + x] ? on : near(x, y) ? null : off)?.push([ x, y ]);
+  const probe = Array.from({
+    length: 64
+  }, (_, i) => on[Math.floor(i * on.length / 64)]);
+  return t.pts = {
+    on: on,
+    off: off,
+    probe: probe
+  };
+}
+
+function inkMask(fr, isInk) {
+  const {W: W, H: H, data: data} = fr, m = new Uint8Array(W * H);
+  for (let p = 0, i = 0; p < W * H; p++, i += 4) m[p] = isInk(data[i], data[i + 1], data[i + 2]) ? 1 : 0;
+  return maskFrom(m, W, H);
+}
+
+function halfInkMask(fr, isInk) {
+  const {W: W, data: data} = fr, cw = fr.W >> 1, ch = fr.H >> 1, m = new Uint8Array(cw * ch);
+  for (let y = 0; y < ch; y++) for (let x = 0, i = y * 2 * W * 4; x < cw; x++, i += 8) m[y * cw + x] = isInk(data[i], data[i + 1], data[i + 2]) ? 1 : 0;
+  return maskFrom(m, cw, ch);
+}
+
+function maskFrom(m, W, H) {
+  const mh = new Uint8Array(W * H), md = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    const r = y * W;
+    for (let x = 0; x < W; x++) mh[r + x] = m[r + x] | (x > 0 ? m[r + x - 1] : 0) | (x < W - 1 ? m[r + x + 1] : 0);
+  }
+  for (let p = 0; p < W * H; p++) md[p] = mh[p] | (p >= W ? mh[p - W] : 0) | (p < W * H - W ? mh[p + W] : 0);
+  const W1 = W + 1, sum = new Int32Array(W1 * (H + 1)), sumd = new Int32Array(W1 * (H + 1));
+  for (let y = 0; y < H; y++) {
+    let a = 0, b = 0;
+    const r = y * W, cur = (y + 1) * W1 + 1, prev = y * W1 + 1;
+    for (let x = 0; x < W; x++) {
+      a += m[r + x];
+      b += md[r + x];
+      sum[cur + x] = sum[prev + x] + a;
+      sumd[cur + x] = sumd[prev + x] + b;
+    }
+  }
+  return {
+    W: W,
+    H: H,
+    m: m,
+    md: md,
+    sum: sum,
+    sumd: sumd
+  };
+}
+
+function matchTemplate(mk, t, recall, noise, accept) {
+  const {W: W, H: H, m: m, md: md, sum: sum, sumd: sumd} = mk, {w: w, h: h} = t;
+  if (W < w || H < h) return null;
+  const {on: on, off: off, probe: probe} = tmplPoints(t);
+  const lin = pts => pts.map(([x, y]) => y * W + x);
+  const onL = lin(on), offL = lin(off), probeL = lin(probe), quickL = probeL.filter((_, i) => i % 4 === 0);
+  const W1 = W + 1;
+  const minInk = on.length * recall, maxInk = on.length + off.length * noise + (w * h - on.length - off.length);
+  const probeMiss = probeL.length * (1 - recall), quickMiss = quickL.length * (1 - recall);
+  for (let oy = 0; oy + h <= H; oy++) {
+    const top = oy * W1, bot = (oy + h) * W1;
+    for (let ox = 0; ox + w <= W; ox++) {
+      const A = bot + ox + w, B = top + ox + w, C = bot + ox, D = top + ox;
+      if (sumd[A] - sumd[B] - sumd[C] + sumd[D] < minInk || sum[A] - sum[B] - sum[C] + sum[D] > maxInk) continue;
+      const o = oy * W + ox;
+      let miss = 0;
+      for (const k of quickL) if (!md[o + k] && ++miss > quickMiss) break;
+      if (miss > quickMiss) continue;
+      miss = 0;
+      for (const k of probeL) if (!md[o + k] && ++miss > probeMiss) break;
+      if (miss > probeMiss) continue;
+      let hit = 0, bad = 0;
+      for (const k of onL) hit += md[o + k];
+      if (hit < onL.length * recall) continue;
+      for (const k of offL) bad += m[o + k];
+      if (bad > offL.length * noise) continue;
+      if (accept && !accept({
+        x: ox,
+        y: oy
+      })) continue;
+      return {
+        x: ox,
+        y: oy
+      };
+    }
+  }
+  return null;
+}
+
+function searchTemplates(fr, tmpls, isInk, recall, noise) {
+  const {W: W, H: H} = fr, hm = halfInkMask(fr, isInk);
+  const PAD = 4;
+  for (const t of tmpls) {
+    let hit = null;
+    matchTemplate(hm, tmplHalf(t), recall * .8, noise * 2, p => {
+      const x0 = Math.max(0, p.x * 2 - PAD), y0 = Math.max(0, p.y * 2 - PAD);
+      const x1 = Math.min(W, p.x * 2 + t.w + PAD), y1 = Math.min(H, p.y * 2 + t.h + PAD);
+      const q = matchTemplate(inkMask(subFrame(fr, x0, y0, x1 - x0, y1 - y0), isInk), t, recall, noise);
+      if (q) hit = {
+        t: t,
+        x: x0 + q.x,
+        y: y0 + q.y
+      };
+      return !!q;
+    });
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function subFrame(fr, x, y, w, h) {
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let r = 0; r < h; r++) data.set(fr.data.subarray(((y + r) * fr.W + x) * 4, ((y + r) * fr.W + x + w) * 4), r * w * 4);
+  return {
+    W: w,
+    H: h,
+    data: data
+  };
+}
+
+const CPN_T = {
+  w: 447,
+  h: 18,
+  b64: "AMAAPzAAAAYA+MEA/x8AwP8HAMAAAAAYAAAHAMYAAPgDAAADAGAAAAAYAAADAGAAYAAAgAEAMAAA4AAAHACAAwAAYIABAAAAHAAAYAAAABwAgAMAZwAAAAAAgAEAMAAAAAwAgAEAMAA4AADAAAAYAMBxAAAOwMEBAAAwwAAAAAAGAMAwAIAHDuDAwYAzAAAAAADOAOA4AIABBgDDAPwYABwAB2DAAAwAwD/4PwcAwADg/xlgAAAA4B8AYBgAYAYHzOFwwBkA8P8PAGYAYAwAwAADgGEAzg+AP4ADMGAABgBgHACAA3xgAIAZDHAAAAAQGAAwDAAYhAOCcDjgDAAAAAAAMwAwBgBggAHAMAAHBiAgwAEYMAADABAOAMABODgAQBgGAAAAAAAAABgGAAzGgcE4HHAGAAAAAIAZABgDADDAAGAYgAMDAADgAAwYgAEADgf8/wAMGAAwHAMAAAAAAAAADAMABuPAYBwOOAMA4A8AwAwAjAEAGGAAMAzg/wEAAHAABgzAAID/A4NxAAYMAPCDAQAAAAAAAACDAQCDcWAwDgecAQAMGIBhBoDBAAAMMPAfBhjHAAAAOAADBmAAQMCBwTgAAwYA4MAAAAAAAAAAgMEAgME4MBiHA+4AAAYMwBEHwOAAAAYYOAADBmMAAAAcgAEDcAAc4MBgGIABAwBgYMC/PwBwYATA4ADAYDwYjIPbYwAAAwbgjgdg8ACABzwMgAMAMPBfDw7AgAF4wAMwwB8M4MMBwP8/AAAAAAAAADgwAGAwDgzGAQAwAIADA3DGABgYAMAHBgbAAAAYAAAAB2DAAAwAAAAAAADw4QAAAAAAAAAAAAAABBgAIAwHjOEAAAAAgMEAOGAABgwAEAIDA2AAAAAAAIADMGAABgAAAAAAANxwAAAAAAAAAAAAAAABDAAggwNscAAAAACAMQAcMIABBgAMg4EBMAAAABjAwIEYMBADAP8D+P8BxzAAwP8H+P8AAPwfwAAGAODAARw44P8HAMAY4P8fYAADAIbBwAAfAGMADGDAfwz4jwFgAAMM4ODAHAAAAAMAYAAAAxgYAAMAAOAAABxwgAMAYAwAAAwcgAGAgWHg/wzAMQD+PwAABgDAADCAAQZwAAAOAACAAQAwAIABDACAAQAAcAAADjjAAQA4DgAABgDAAAAAMAAABuA4AAMcAAADAGAAGMAABzgAAAcAAMAAABgAwAAGAMAAAAA4AAAHHOAAAL4/AAADAGAAAAAYAAAD+D+AAQwAgAEAMGDwP4D/HwAAAwAAYAAADADA/wEAYAAAABwAgAP+fwAAAAAAgAEAMAAAAAwAgIHHccD/BwDAAAAYMA=="
+};
+
+const CPN_DX = 120;
+
+const CPN_Y = [ .1, .5 ];
+
+const CPN_RECALL = .85;
+
+const CPN_NOISE = .15;
+
+const CPN_GONE_CHECKS = 4;
+
+const cpn = {
+  seen: false,
+  misses: 0,
+  at: null,
+  error: null
+};
+
+function resetCoupon() {
+  Object.assign(cpn, {
+    seen: false,
+    misses: 0,
+    at: null,
+    error: null
+  });
+  hideAlarm("coupon");
+}
+
+function findCoupon() {
+  const W = video.videoWidth, H = video.videoHeight, {w: w, h: h} = CPN_T;
+  const rx = Math.max(0, Math.round(W / 2 - w / 2 - CPN_DX)), ry = Math.round(H * CPN_Y[0]);
+  const rw = Math.min(W - rx, w + CPN_DX * 2), rh = Math.min(H - ry, Math.round(H * (CPN_Y[1] - CPN_Y[0])) + h);
+  if (rw < w || rh < h) return null;
+  const p = matchTemplate(inkMask(cropFull({
+    x: rx,
+    y: ry,
+    w: rw,
+    h: rh
+  }), isWhiteInk), CPN_T, CPN_RECALL, CPN_NOISE);
+  return p && {
+    x: rx + p.x,
+    y: ry + p.y,
+    w: w,
+    h: h
+  };
+}
+
+function couponTick() {
+  let at;
+  try {
+    at = findCoupon();
+    cpn.error = null;
+  } catch (e) {
+    cpn.error = e.message;
+    return;
+  }
+  cpn.at = at;
+  if (at) {
+    cpn.misses = 0;
+    if (!cpn.seen) {
+      cpn.seen = true;
+      cpn.firedAt = Date.now();
+      couponBeep();
+      flashTitle("경험치 쿠폰 종료");
+      showAlarm("coupon", "경험치 쿠폰(도핑) 효과가 끝났습니다.");
+    }
+  } else if (cpn.seen && ++cpn.misses >= CPN_GONE_CHECKS) {
+    cpn.seen = false;
+    cpn.misses = 0;
+  }
+}
+
+function updateCouponUi() {
+  const st = $("#st-cpn");
+  st.hidden = !cfg.cpnOn;
+  st.classList.toggle("alert", alarmKind === "coupon");
+  const when = cpn.firedAt ? ` · 마지막 종료 ${new Date(cpn.firedAt).toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  })}` : "";
+  st.textContent = cpn.error ? "쿠폰 오류: " + cpn.error : (!stream || !monitoring ? "쿠폰 감시" : cpn.at ? "쿠폰 종료 문구!" : "쿠폰 감시 중") + when;
+}
+
+const LIE_B = [ {
+  w: 170,
+  h: 24,
+  b64: "AAADAIADAMABAADgAADAAADAAADwAAAMAAAOAAAHAACAAwAAAwAAAwDA838w8D848D8cAPgfDvgfDPg/DPwfz//BwP/gwP9xAOB/OOB/MOD/MPB/PAADA4CDAwfHD4AD4ADAwQCAwwDA8QAMDAAODhwcPwAOgAMABwMADgMAxwM4MAAcOHBw/AD4H/4ADgwAPAwADA/gwABw4MDBcQDgf/gDODAAcDAAcDyAgwPwgwMHxwGAA+AA8MAA4MEA4PAA5w/AHw78HwcADoADwAMDAAcDgMMPDj/g8zjQPxwAOAAOgA8MAA8MAAc/OODAA+MAAHAA4AA4AD8wABwwAAw88AADA4ADAAAAgP/3AP7BADzAADzw8AEMDAAOAAAAAP7fA3wPA/AAA3DA4wEwAOAAwP8fAAAAADzwDPAADPwAzwfAAIADAP9/AAAAAPDAM/ABMPABPAOAAwAOAPz/AQD+/8AAwMADwMAD8AwADgA8APD/BwDw/wMDAAMHAAMDwAMAOAD4A8D/DwDgAA4AAAwAAAwAAA8A4ADwDwAPAACAAzgAADAAADAAADwAgAPw8AEcAAAADuAAAMAAAMAAAPAAAA7wgw/w/wMA+PwDAAADAAADAMADADDAAXDA/z8AwP8PAAAMAAAMAAAPAMAAA4AB/38AAP8fAAAwAAAwAAA4"
+}, {
+  w: 164,
+  h: 24,
+  b64: "AAAA8P8AAAAAAAAAAAAAAAAAAABgcBjA/x8AADAAADAAMAAAADAAAAwHxwP8/wAAgAP8gAOADwAHgAP/w/F/PMABAMD/OMA/OAD8AHAAOPA/HP/HAxwAAP+PA4+DA+A9AAeAAwfA8X/8wAEA8P84cHA4wI8PcAA4MAAcB8cP/P8BB4CDA/8DP/ADB4ADA8BxcDzA/x9wADg48D/gADxwADgwABwPxwMADwAHgAMDjwMAAAAHgAMDwPF/PABwAHAAOHBwOAAAAHAAODAA/PzDAwAHAP+PA/4Dw///DweAAwPADwA8APAA4P84wB8w/P//cAA4MAAcAADA//8P8IADAAAAMAAAB4ADA8ABAAD8//8ADjgAAAAAAABwADgwABwAAAAAAADggAMAAAAAAAAPgAMHwIH/HwAAAAAOOAAMDMAADPD/OPD/HPj/A+A/AOCAA+DAABzAAPyPA/3LgP8/AP8PwA84AA4cwA8PAAA4AAAM+P8BPODB/78D8OEB/P8AAIADAMCB/x/AARz8/zkAHz/A/w8AADgAABwYAAAcwAEAgAP8fw8cwAAAgAMAwIADAIADDwAAOMDz48ABDgAAOAAADPj/A/A/AACAAwwMDPz/AACAAwDAgf8/AP4DAAA4QMCAwP8PAAA4AAAc"
+}, {
+  w: 176,
+  h: 23,
+  b64: "AIABAIAB4B8AAACAAQCIAQAAYAAAQPiAA/6BA/j/AAD8wAE/nAOA/+HA/+D+gQP+gQMY4AEA/sEBP5wDwP/hwP/gnocDgPEDHOABAIfHAQCcA8Dh4QDw4A6HA4DxAxzgAQCHxwEAnAPAweEA4OAHhgP+gQP4fwCAA8fh/5wDwMH/AHDgA4YD/oED8H8AgAPH4f+cA8DB/wBg4AeGAx7wBwAAAACHxwEAnAPAwf8AcOAGhgMG8AcAAAAA/8MBAJwDwMHhADj6noMDBoAHAAAAAPzAAQD8A8Dj4QA8/v6BAwaAh///DwAAwAEe/APA/+EAPPAAgAD+h4cb4AMAAMCBf/wDgGfgAH/gAAAA/ocHAAAAAADAgWGcAwAA4AD/4QAAAAAAAAAAAOD/z8HhnAMAAOCAw+MggAEAAAD4/wHg/8/B4ZwDAADg4IHncIAD+P8D/P8BADDAgX+MAwAOYOAA4HCAA/D/A/z/AQAwwAE/jAMADgBgAODw/wMAgAP8/wEAMMABAIwDAA4AAADg8P8DAIAD/P8BADDAAQCMAwAOAAAA4HCAAwCAAxwAAAAwwAEAjAMADgAAAOBwgAMAgAMcAAAAMMABAIwDAB4AAADg8P8DAIAD/P8BAADAAQCAAwD8/wEA4PD/AwCAA/z/AQAAwAEAgAMA/P8BAOA="
+} ];
+
+const LIE_A = [ {
+  w: 141,
+  h: 17,
+  b64: "ABz4AABgACAQCAAGAGCAAAD4j4MxADyMHwYH8c8AHgx4wA//cTgG4I7z9/wj/hngjoE//PMDDsMADDHAHj4EBgOEMRiG4X/A4xjAIc6f44fAYIAwHoNwhA84+AE4xPh53BAYDBDGYRCG8GEHPgDGGAOPMQ6HAeYYDMPw/+/8L4APY+ARxPExgA8DPzj/ANz/DwBA/DvCCCMGACAAAH8cAPP/AQCIf8YdccwAAAQAwA/jcPgHAIMBgPAgAhiA4QAAAGD8D/8B4DDgHwAEAAMwPv8/AIz/4T8A/AeAA4AAYADGBwAAA3A//AeAwwBgABAADMD4AABgAA6HfwBwGAAMAAAAAJgRAAAMwP/wHwD+A4ABAAAAAP8DAIB/+B/+A8B/ACAAAAAA4DkAAPAf"
+}, {
+  w: 155,
+  h: 16,
+  b64: "ABgABAIBgAAAAAAGQQMAAECAAcbB/rf/CQME4H/4cf8b/oPDAn8wDua38U8YIAB4wJj724ADGBYMg3EwEg0fwgABwAHHjM8GHMC4YBCMh9F4+BAGCAAfOGR8NvAB9gWDYC6MxmOMM0AAnMMxM/bhGDguGAYbYzQeY7wBAjAQjJihD4PBYYE5eBCj0QjiDBgAAMDHDX8IAB4L/MAAkP/GGOP/AP8/AOZu+/+ZWyAOBv+4NnwIPgb4/8E4PNv/T8ACcyD8B6DBQQAgADjg/8HYgAMCFpwDATgADQACAAGAAQAMwAYMAJD8/wD+AWgAMAAIAAwAYAB0QACABQAA+A9AAoAAQABgAAADgAECACQAAMMAABAAAAAAAAAAAAAAAAAAAQAY/gMAAAAAAAAAAAAAAAAAAAAAAA=="
+}, {
+  w: 316,
+  h: 16,
+  b64: "AMA/wg/DYwG4J/gjAD8bAAD8AwD/wI8AAIDA+N/4I/BsAD4IAwwvBADgIAwwZBaAOQI4AnCwAQbAAADwD8AIAAIIjN+NPgLMBiCAMMAwQAAABkMAM2wBCCEAIwADG+AABAAAAwAIACCAwbDc8CHADAACCAMMAwQAYD4E8MMXgBAOOAZwuAEOwD8AMACAAAACHAzLDx8C/ADggDDAMMAAAA/DgDN8AQjh+OEAHxsAAQQAAP8ACAMAQMOw/BDj4G4AOAgDDAP8APAgDDjCFsAQjgEOcLDBMEAAAPAPiDAAAGAMyw8xDsYGgIMwwDDAD8AwwgfjYwGIIQggAAMTAAAMAAA8AIkBABDIsP0IYjBsAP8PAwwD9AAEIAAAHBaAPIcDAzAwAQDAPwDwDxAYgAAADN+NMAbBBnDDcMAwYAAAIAAAAUABADPQMwAMGwAAAAAAPMTDAQwA7gDckAEAbAAACAwMAAYAABIwMAAUAAACAAIAsDHPAAAAgAH+H8AA8A/ADQ4CwAYAgADAAEAAABwB/wNgAwAgACAAABgAgP8fAH4AgAAEAMAA3AAgAGwA8A8ABAAEAMAQ8D0ANgAAAgACAIABABAAADAEABhAAAAPwA0AAsAGAPMAQABAAAAMA4cDAAEAAAAAAAAAAAAAAADDAAAAAIA/AAAAAAAAADAMAAAAAADAMHA4AAAAAAAAAAAAAAAAAAAwDAAAIAAYAAAAAAAAAADDAAAAAAAA0AH+AwAAAAAAAAAAAAAAAAAARAAAAAMAPQAAAAAAAADwDwAAAAAAAA8AAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAA="
+} ];
+
+const LIE_IV = 500;
+
+const LIE_RECALL_B = .85;
+
+const LIE_RECALL_A = .85;
+
+const LIE_NOISE = .15;
+
+const LIE_A_AREA = {
+  x: .6,
+  y: .55
+};
+
+const LIE_A_EVERY = 4;
+
+let lieSkipA = 0;
+
+const LIE_REPEAT_MS = 2e3;
+
+const LIE_GONE_CHECKS = 3;
+
+const lie = {
+  kind: null,
+  at: null,
+  visible: false,
+  misses: 0,
+  muted: false,
+  lastAlertAt: 0,
+  firedAt: null,
+  ms: 0,
+  error: null
+};
+
+function resetLie() {
+  Object.assign(lie, {
+    kind: null,
+    at: null,
+    visible: false,
+    misses: 0,
+    muted: false,
+    lastAlertAt: 0,
+    ms: 0,
+    error: null
+  });
+  hideAlarm("lie");
+}
+
+function findLie() {
+  const W = video.videoWidth, H = video.videoHeight;
+  const full = cropFull({
+    x: 0,
+    y: 0,
+    w: W,
+    h: H
+  });
+  const b = searchTemplates(full, LIE_B, isOrangeInk, LIE_RECALL_B, LIE_NOISE);
+  if (b) return {
+    kind: "B",
+    at: {
+      x: b.x,
+      y: b.y,
+      w: b.t.w,
+      h: b.t.h
+    }
+  };
+  if (lie.kind !== "A" && lieSkipA++ % LIE_A_EVERY) return null;
+  const ax = Math.round(W * LIE_A_AREA.x), ay = Math.round(H * LIE_A_AREA.y);
+  const a = searchTemplates(subFrame(full, ax, ay, W - ax, H - ay), LIE_A, isWhiteInk, LIE_RECALL_A, LIE_NOISE);
+  if (a) return {
+    kind: "A",
+    at: {
+      x: ax + a.x,
+      y: ay + a.y,
+      w: a.t.w,
+      h: a.t.h
+    }
+  };
+  return null;
+}
+
+const LIE_MSG = {
+  A: "거짓말 탐지기(A)가 시작됩니다! 화면 가운데에서 문제를 푸세요.",
+  B: "거짓말 탐지기(B)가 나타났습니다! 별을 클릭한 뒤 글자를 입력하세요."
+};
+
+function lieTick() {
+  if (!monitoring || !cfg.ldOn || !hasFrame()) {
+    updateUi();
+    return;
+  }
+  const now = performance.now();
+  let res;
+  try {
+    res = findLie();
+    lie.error = null;
+  } catch (e) {
+    lie.error = e.message;
+    updateUi();
+    return;
+  }
+  lie.ms = Math.round(performance.now() - now);
+  lie.at = res && res.at;
+  if (res) {
+    lie.misses = 0;
+    if (!lie.visible) {
+      lie.visible = true;
+      lie.muted = false;
+      lie.lastAlertAt = 0;
+      lie.firedAt = Date.now();
+    }
+    lie.kind = res.kind;
+    if (!lie.muted && now - lie.lastAlertAt >= LIE_REPEAT_MS) {
+      lie.lastAlertAt = now;
+      lieBeep();
+      flashTitle("거짓말 탐지기!");
+      showAlarm("lie", LIE_MSG[res.kind]);
+    }
+  } else if (lie.visible && ++lie.misses >= LIE_GONE_CHECKS) {
+    lie.visible = false;
+    lie.misses = 0;
+    hideAlarm("lie");
+  }
+  updateUi();
+}
+
+const setLieTicker = workerTimer(lieTick);
+
+function updateLieUi() {
+  const st = $("#st-lie");
+  st.hidden = !cfg.ldOn;
+  st.classList.toggle("alert", lie.visible);
+  const when = lie.firedAt ? ` · 마지막 ${new Date(lie.firedAt).toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  })}` : "";
+  st.textContent = lie.error ? "탐지기 오류: " + lie.error : !stream || !monitoring ? "탐지기 감시" + when : lie.visible ? `거짓말 탐지기 ${lie.kind}!${lie.muted ? " (알림 끔)" : ""}` : `탐지기 감시 중 (${lie.ms}ms)` + when;
+}
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext);
+  if (audioCtx.state === "suspended") audioCtx.resume();
+}
+
+function beep() {
+  ensureAudio();
+  const t0 = audioCtx.currentTime + .02;
+  const vol = Math.max(2e-4, cfg.vol * .3);
+  [ 0, .22, .44 ].forEach((dt, i) => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "square";
+    o.frequency.value = i === 2 ? 1175 : 880;
+    const t = t0 + dt;
+    g.gain.setValueAtTime(1e-4, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + .02);
+    g.gain.exponentialRampToValueAtTime(1e-4, t + .18);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t);
+    o.stop(t + .2);
+  });
+}
+
+function runeBeep() {
+  ensureAudio();
+  const t0 = audioCtx.currentTime + .02;
+  const vol = Math.max(2e-4, cfg.vol * .35);
+  [ [ 0, 1319 ], [ .12, 1568 ], [ .24, 2093 ], [ .5, 1319 ], [ .62, 1568 ], [ .74, 2093 ] ].forEach(([dt, f]) => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "triangle";
+    o.frequency.value = f;
+    const t = t0 + dt;
+    g.gain.setValueAtTime(1e-4, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + .015);
+    g.gain.exponentialRampToValueAtTime(1e-4, t + .11);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t);
+    o.stop(t + .12);
+  });
+}
+
+function couponBeep() {
+  ensureAudio();
+  const t0 = audioCtx.currentTime + .02;
+  const vol = Math.max(2e-4, cfg.vol * .35);
+  [ [ 0, 988 ], [ .15, 784 ], [ .3, 659 ], [ .6, 988 ], [ .75, 784 ], [ .9, 659 ] ].forEach(([dt, f]) => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.value = f;
+    const t = t0 + dt;
+    g.gain.setValueAtTime(1e-4, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + .015);
+    g.gain.exponentialRampToValueAtTime(1e-4, t + .14);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t);
+    o.stop(t + .15);
+  });
+}
+
+function lieBeep() {
+  ensureAudio();
+  const t0 = audioCtx.currentTime + .02;
+  const vol = Math.max(2e-4, cfg.vol * .4);
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = "sawtooth";
+  for (let k = 0; k < 8; k++) o.frequency.setValueAtTime(k % 2 ? 660 : 1320, t0 + k * .15);
+  g.gain.setValueAtTime(1e-4, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + .02);
+  g.gain.setValueAtTime(vol, t0 + 1.15);
+  g.gain.exponentialRampToValueAtTime(1e-4, t0 + 1.2);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t0);
+  o.stop(t0 + 1.22);
+}
+
+let titleTimer = null;
+
+const baseTitle = document.title;
+
+function flashTitle(msg) {
+  clearInterval(titleTimer);
+  let on = false, n = 0;
+  titleTimer = setInterval(() => {
+    on = !on;
+    document.title = on ? "🔔 " + msg : baseTitle;
+    if (++n > 12) {
+      clearInterval(titleTimer);
+      document.title = baseTitle;
+    }
+  }, 700);
+}
+
+function fire(stillMs) {
+  beep();
+  flashTitle("MP 변화 없음");
+  mp.alarm = `MP 변화가 ${Math.round(stillMs / 1e3)}초 동안 없습니다.`;
+  showAlarm("mp", mp.alarm);
+}
+
+let alarmKind = null;
+
+let alarmWaiting = null;
+
+function showAlarm(kind, msg) {
+  if (alarmKind === "lie" && kind !== "lie") {
+    alarmWaiting = {
+      kind: kind,
+      msg: msg
+    };
+    return;
+  }
+  if (kind === "lie" && alarmKind && alarmKind !== "lie") alarmWaiting = {
+    kind: alarmKind,
+    msg: $("#alarm-msg").textContent
+  };
+  alarmKind = kind;
+  $("#alarm-msg").textContent = msg;
+  $("#alarm").hidden = false;
+}
+
+function hideAlarm(kind) {
+  if (kind === "mp") mp.alarm = false;
+  if (kind && alarmWaiting?.kind === kind) alarmWaiting = null;
+  if (kind && kind !== alarmKind) return;
+  alarmKind = null;
+  $("#alarm").hidden = true;
+  const w = alarmWaiting;
+  alarmWaiting = null;
+  if (kind === "lie" && w && (w.kind !== "mp" || mp.alarm)) showAlarm(w.kind, w.msg); else if (kind !== "mp" && mp.alarm) showAlarm("mp", mp.alarm);
+}
+
+function closeAlarm() {
+  if (alarmKind === "lie") {
+    lie.muted = true;
+    return hideAlarm("lie");
+  }
+  if (alarmKind === "coupon") return hideAlarm("coupon");
+  if (alarmKind !== "rune") return hideAlarm("mp");
+  rune.muted = true;
+  hideAlarm("rune");
+}
+
+$("#alarm-ok").addEventListener("click", closeAlarm);
+
+$("#alarm-x").addEventListener("click", closeAlarm);
+
+function setMain(text) {
+  $("#st-main").textContent = text;
+}
+
+function updateUi() {
+  $("#btn-monitor").disabled = !stream || !cfg.mpOn && !cfg.runeOn && !cfg.cpnOn && !cfg.ldOn;
+  updateCouponUi();
+  updateLieUi();
+  updateRuneUi();
+  $("#btn-auto").hidden = !cfg.mp;
+  const size = hasFrame() ? [ video.videoWidth, video.videoHeight ] : null;
+  $("#st-res").textContent = size ? `${size[0]}×${size[1]}` : "-";
+  const r = mpRegion();
+  const stMp = $("#st-mp");
+  stMp.classList.toggle("alert", !!mp.alarm);
+  if (!stream) setMain("준비 — [화면 공유]를 누르세요"); else if (monitoring) setMain("감시 중"); else setMain("[감시 시작]을 누르세요");
+  stMp.hidden = !cfg.mpOn;
+  if (!stream) {
+    stMp.textContent = cfg.mp ? `MP 바 직접 지정 (${cfg.mp.x}, ${cfg.mp.y}) ${cfg.mp.w}×${cfg.mp.h}` : "MP 바 자동 인식";
+    return;
+  }
+  if (!r) {
+    stMp.textContent = "MP 바 찾는 중… (못 찾으면 미리보기에서 MP 바를 드래그해 직접 지정)";
+    return;
+  }
+  if (size && (r.x + r.w > size[0] || r.y + r.h > size[1])) {
+    stMp.textContent = "⚠ 직접 지정한 MP 영역이 화면 밖입니다 — 다시 드래그하거나 [자동 인식으로]";
+    return;
+  }
+  const where = cfg.mp ? "직접 지정" : "자동 인식";
+  if (!monitoring) {
+    stMp.textContent = `MP 바 ${where} (${r.x}, ${r.y}) ${r.w}×${r.h} · ${HOLD_SEC}초 동안 변화 없으면 알림`;
+    return;
+  }
+  const l = mp.live;
+  const ago = mp.changedAt == null ? "-" : `${Math.round((performance.now() - mp.changedAt) / 1e3)}초 전`;
+  if (!l) stMp.textContent = "측정 준비 중…"; else if (l.error) stMp.textContent = "오류: " + l.error; else if (l.hidden) stMp.textContent = `MP 판독 불가 (화면 가려짐) · 마지막 변화 ${ago}`; else stMp.textContent = `MP ${(l.fill * 100).toFixed(1)}% · ${l.cond ? "변화 없음" : "변화 감지"} · 마지막 변화 ${ago}`;
+}
+
+function updateRuneUi() {
+  const st = $("#st-rune");
+  st.hidden = !cfg.runeOn;
+  st.classList.toggle("alert", rune.visible);
+  const cd = runeCountdown();
+  const next = cd == null ? "" : cd > 0 ? ` · 다음 룬까지 ${mmss(cd)}` : " · 룬 나올 시간";
+  if (!stream || !monitoring) st.textContent = `룬 감시 (${cfg.rcd}분)${next}`; else if (rune.error) st.textContent = "룬 오류: " + rune.error; else if (rune.visible) st.textContent = `룬 등장!${rune.muted ? " (알림 끔)" : ""}`; else if (!rune.map) st.textContent = rune.mapLostSince == null ? "미니맵 찾는 중…" : `미니맵 안 보임 (좌상단 미니맵을 펼쳐 두세요)${next}`; else st.textContent = `룬 없음${next}`;
+}
+
+let lastDraw = 0;
+
+function render(ts) {
+  requestAnimationFrame(render);
+  if (!hasFrame() || ts - lastDraw < 66) return;
+  lastDraw = ts;
+  if (pv.width !== video.videoWidth || pv.height !== video.videoHeight) {
+    pv.width = video.videoWidth;
+    pv.height = video.videoHeight;
+    updateUi();
+  }
+  pctx.drawImage(video, 0, 0);
+  const lw = Math.max(2, pv.width / 600);
+  const fs = Math.max(14, Math.round(pv.width / 80));
+  pctx.font = `bold ${fs}px sans-serif`;
+  const box = (b, color, label, m) => {
+    pctx.lineWidth = lw * 2;
+    pctx.strokeStyle = color;
+    pctx.strokeRect(b.x - m, b.y - m, b.w + m * 2, b.h + m * 2);
+    if (!label) return;
+    const tw = pctx.measureText(label).width + 8;
+    const ly = b.y - m - fs - 6 >= 0 ? b.y - m - fs - 6 : b.y + b.h + m;
+    pctx.fillStyle = color;
+    pctx.fillRect(b.x - m, ly, tw, fs + 6);
+    pctx.fillStyle = "#000";
+    pctx.fillText(label, b.x - m + 4, ly + fs);
+  };
+  if (drag) {
+    const d = dragRect(drag);
+    pctx.setLineDash([ lw * 4, lw * 3 ]);
+    pctx.lineWidth = lw;
+    pctx.strokeStyle = "#00ffff";
+    pctx.strokeRect(d.x, d.y, d.w, d.h);
+    pctx.setLineDash([]);
+    return;
+  }
+  if (monitoring && cfg.runeOn && rune.map) {
+    box(rune.map.border, rune.visible ? "#ff00ff" : "#00ff00", rune.visible ? "룬!" : "미니맵", lw);
+    if (rune.at) box(rune.at, "#ff00ff", "", lw * 3);
+  }
+  if (monitoring && cfg.cpnOn && cpn.at) box(cpn.at, "#ffa500", "쿠폰 종료", lw);
+  if (monitoring && cfg.ldOn && lie.at) box(lie.at, "#ff0000", "거짓말 탐지기 " + lie.kind, lw * 2);
+  const r = cfg.mpOn ? mpRegion() : null;
+  if (r) {
+    const color = mp.alarm ? "#ff0000" : !monitoring ? "#c0c0c0" : mp.live?.cond ? "#ffff00" : "#00ff00";
+    box(r, color, cfg.mp ? "MP (직접 지정)" : "MP", lw * 2);
+  }
+}
+
+requestAnimationFrame(render);
+
+let drag = null;
+
+function toCanvas(e) {
+  const b = pv.getBoundingClientRect();
+  return {
+    x: (e.clientX - b.left) * pv.width / b.width,
+    y: (e.clientY - b.top) * pv.height / b.height
+  };
+}
+
+function dragRect(d) {
+  const x = Math.max(0, Math.round(Math.min(d.x0, d.x1))), y = Math.max(0, Math.round(Math.min(d.y0, d.y1)));
+  const x2 = Math.min(pv.width, Math.round(Math.max(d.x0, d.x1))), y2 = Math.min(pv.height, Math.round(Math.max(d.y0, d.y1)));
+  return {
+    x: x,
+    y: y,
+    w: x2 - x,
+    h: y2 - y
+  };
+}
+
+pv.addEventListener("pointerdown", e => {
+  if (!hasFrame()) return;
+  const p = toCanvas(e);
+  drag = {
+    x0: p.x,
+    y0: p.y,
+    x1: p.x,
+    y1: p.y
+  };
+  pv.setPointerCapture(e.pointerId);
+});
+
+pv.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const p = toCanvas(e);
+  drag.x1 = p.x;
+  drag.y1 = p.y;
+});
+
+pv.addEventListener("pointerup", () => {
+  if (!drag) return;
+  const r = dragRect(drag);
+  drag = null;
+  if (r.w < 20 || r.h < 4) return;
+  setManualMp(r);
+});
+
+function setManualMp(r) {
+  cfg.mp = r;
+  writeConfig();
+  resetMp();
+  updateUi();
+}
+
+$("#btn-auto").addEventListener("click", () => {
+  cfg.mp = null;
+  writeConfig();
+  autoMp = null;
+  resetMp();
+  updateUi();
+});
+
+$("#btn-capture").addEventListener("click", () => {
+  ensureAudio();
+  stream ? stopCapture() : startCapture();
+});
+
+$("#btn-monitor").addEventListener("click", () => {
+  ensureAudio();
+  setMonitoring(!monitoring);
+});
+
+const intervalSel = $("#interval");
+
+intervalSel.value = String(cfg.iv);
+
+intervalSel.addEventListener("change", () => {
+  cfg.iv = Number(intervalSel.value);
+  writeConfig();
+  if (monitoring) setTicker(cfg.iv);
+});
+
+const useMp = $("#use-mp"), useRune = $("#use-rune"), useCpn = $("#use-cpn"), useLd = $("#use-ld"), runeCd = $("#rune-cd");
+
+useMp.checked = cfg.mpOn;
+
+useRune.checked = cfg.runeOn;
+
+useCpn.checked = cfg.cpnOn;
+
+useLd.checked = cfg.ldOn;
+
+runeCd.value = String(cfg.rcd);
+
+function onFeatureChange() {
+  cfg.mpOn = useMp.checked;
+  cfg.runeOn = useRune.checked;
+  cfg.cpnOn = useCpn.checked;
+  cfg.ldOn = useLd.checked;
+  writeConfig();
+  if (!cfg.mpOn) autoMp = null;
+  setMonitoring(monitoring && (cfg.mpOn || cfg.runeOn || cfg.cpnOn || cfg.ldOn));
+}
+
+useCpn.addEventListener("change", onFeatureChange);
+
+useLd.addEventListener("change", onFeatureChange);
+
+useMp.addEventListener("change", onFeatureChange);
+
+useRune.addEventListener("change", onFeatureChange);
+
+runeCd.addEventListener("change", () => {
+  cfg.rcd = Number(runeCd.value);
+  writeConfig();
+  updateUi();
+});
+
+const volume = $("#volume");
+
+volume.value = cfg.vol;
+
+volume.addEventListener("input", () => {
+  cfg.vol = Number(volume.value);
+  writeConfig();
+});
+
+volume.addEventListener("change", () => (cfg.mpOn ? beep : runeBeep)());
+
+$("#btn-clean").addEventListener("click", () => {
+  const bat = "taskkill /f /im explorer.exe\r\nstart explorer.exe\r\n";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([ bat ], {
+    type: "application/octet-stream"
+  }));
+  a.download = "clean.bat";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1e4);
+});
+
+const ph = $("#placeholder");
+
+if (!navigator.mediaDevices?.getDisplayMedia) {
+  $("#btn-capture").disabled = true;
+  ph.innerHTML = '<p class="warn">이 브라우저는 화면 공유를 지원하지 않습니다.<br>PC용 Chrome 또는 Edge를 사용하세요.</p>';
+} else if (/firefox/i.test(navigator.userAgent)) {
+  ph.insertAdjacentHTML("beforeend", '<p class="warn">Firefox에서는 메이플스토리 창이 목록에 안 보일 수 있습니다. Chrome/Edge를 권장합니다.</p>');
+} else if (!window.isSecureContext) {
+  ph.insertAdjacentHTML("beforeend", '<p class="warn">보안 연결(https)이 아니라 화면 공유가 막힐 수 있습니다.</p>');
+}
+
+writeConfig();
+
+updateUi();
+</script>
+</body>
+</html>
