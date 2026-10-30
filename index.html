@@ -260,6 +260,7 @@ function stopCapture() {
   setDetectTicker(0);
   autoMp = null;
   runeMap = null;
+  scaleCache = null;
   $("#placeholder").hidden = false;
   pv.hidden = true;
   $("#btn-capture").textContent = "화면 공유";
@@ -1213,6 +1214,60 @@ function subFrame(fr, x, y, w, h) {
   };
 }
 
+const BASE_H = 1080;
+
+let scaleCache = null;
+
+function titleBarHeight() {
+  const W = video.videoWidth, H = Math.min(80, video.videoHeight);
+  const {data: d} = cropFull({
+    x: 0,
+    y: 0,
+    w: W,
+    h: H
+  });
+  const x0 = Math.round(W * .25), x1 = Math.round(W * .7), ref = (W + x0) * 4;
+  let y = 1;
+  for (;y < H; y++) {
+    const b = (y * W + x0) * 4;
+    if (Math.abs(d[b] - d[ref]) + Math.abs(d[b + 1] - d[ref + 1]) + Math.abs(d[b + 2] - d[ref + 2]) > 60) break;
+    let diff = 0;
+    for (let x = x0; x < x1; x += 3) {
+      const i = (y * W + x) * 4;
+      diff = Math.max(diff, Math.abs(d[i] - d[b]) + Math.abs(d[i + 1] - d[b + 1]) + Math.abs(d[i + 2] - d[b + 2]));
+    }
+    if (diff > 120) break;
+  }
+  return y >= 20 && y <= 60 ? y : 0;
+}
+
+function uiScale() {
+  const W = video.videoWidth, H = video.videoHeight;
+  if (!scaleCache || scaleCache.W !== W || scaleCache.H !== H) {
+    let s = (H - titleBarHeight()) / BASE_H;
+    if (Math.abs(s - 1) < .02) s = 1;
+    scaleCache = {
+      W: W,
+      H: H,
+      s: s
+    };
+  }
+  return scaleCache.s;
+}
+
+function cropScaled(r, s) {
+  if (s === 1) return cropFull(r);
+  const w = Math.round(r.w / s), h = Math.round(r.h / s);
+  work.width = w;
+  work.height = h;
+  wctx.drawImage(video, r.x, r.y, r.w, r.h, 0, 0, w, h);
+  return {
+    W: w,
+    H: h,
+    data: wctx.getImageData(0, 0, w, h).data
+  };
+}
+
 const CPN_T = {
   w: 447,
   h: 18,
@@ -1247,21 +1302,22 @@ function resetCoupon() {
 }
 
 function findCoupon() {
-  const W = video.videoWidth, H = video.videoHeight, {w: w, h: h} = CPN_T;
+  const k = uiScale(), W = video.videoWidth / k, H = video.videoHeight / k, {w: w, h: h} = CPN_T;
   const rx = Math.max(0, Math.round(W / 2 - w / 2 - CPN_DX)), ry = Math.round(H * CPN_Y[0]);
-  const rw = Math.min(W - rx, w + CPN_DX * 2), rh = Math.min(H - ry, Math.round(H * (CPN_Y[1] - CPN_Y[0])) + h);
+  const rw = Math.min(Math.floor(W) - rx, w + CPN_DX * 2), rh = Math.min(Math.floor(H) - ry, Math.round(H * (CPN_Y[1] - CPN_Y[0])) + h);
   if (rw < w || rh < h) return null;
-  const p = matchTemplate(inkMask(cropFull({
-    x: rx,
-    y: ry,
-    w: rw,
-    h: rh
-  }), isWhiteInk), CPN_T, CPN_RECALL, CPN_NOISE);
+  const fr = cropScaled({
+    x: rx * k,
+    y: ry * k,
+    w: rw * k,
+    h: rh * k
+  }, k);
+  const p = matchTemplate(inkMask(fr, isWhiteInk), CPN_T, CPN_RECALL, CPN_NOISE);
   return p && {
-    x: rx + p.x,
-    y: ry + p.y,
-    w: w,
-    h: h
+    x: Math.round((rx + p.x) * k),
+    y: Math.round((ry + p.y) * k),
+    w: Math.round(w * k),
+    h: Math.round(h * k)
   };
 }
 
@@ -1342,7 +1398,7 @@ const LIE_A_AREA = {
   y: .55
 };
 
-const LIE_A_EVERY = 4;
+const LIE_A_EVERY = 2;
 
 let lieSkipA = 0;
 
@@ -1377,34 +1433,30 @@ function resetLie() {
 }
 
 function findLie() {
-  const W = video.videoWidth, H = video.videoHeight;
-  const full = cropFull({
+  const k = uiScale();
+  const full = cropScaled({
     x: 0,
     y: 0,
-    w: W,
-    h: H
+    w: video.videoWidth,
+    h: video.videoHeight
+  }, k);
+  const W = full.W, H = full.H, box = (x, y, t) => ({
+    x: Math.round(x * k),
+    y: Math.round(y * k),
+    w: Math.round(t.w * k),
+    h: Math.round(t.h * k)
   });
   const b = searchTemplates(full, LIE_B, isOrangeInk, LIE_RECALL_B, LIE_NOISE);
   if (b) return {
     kind: "B",
-    at: {
-      x: b.x,
-      y: b.y,
-      w: b.t.w,
-      h: b.t.h
-    }
+    at: box(b.x, b.y, b.t)
   };
   if (lie.kind !== "A" && lieSkipA++ % LIE_A_EVERY) return null;
   const ax = Math.round(W * LIE_A_AREA.x), ay = Math.round(H * LIE_A_AREA.y);
   const a = searchTemplates(subFrame(full, ax, ay, W - ax, H - ay), LIE_A, isWhiteInk, LIE_RECALL_A, LIE_NOISE);
   if (a) return {
     kind: "A",
-    at: {
-      x: ax + a.x,
-      y: ay + a.y,
-      w: a.t.w,
-      h: a.t.h
-    }
+    at: box(ax + a.x, ay + a.y, a.t)
   };
   return null;
 }
