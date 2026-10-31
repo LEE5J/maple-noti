@@ -30,6 +30,8 @@
   #st-lie { flex: 0 0 170px; }
   #st-lie.alert { background: #ff0000; color: #fff; font-weight: bold; }
   #st-cpn.alert { background: #ffa500; color: #000; }
+  #st-bst { flex: 0 0 150px; }
+  #st-bst.alert { background: #00c0ff; color: #000; }
   #st-res { flex: 0 0 110px; text-align: center; }
   #video { position: fixed; left: 0; bottom: 0; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
   #alarm { position: fixed; left: 50%; top: 30%; transform: translateX(-50%); width: min(340px, calc(100vw - 32px)); z-index: 10; }
@@ -72,6 +74,7 @@
         <input type="checkbox" id="use-rune"><label for="use-rune">룬</label>
         <input type="checkbox" id="use-ld"><label for="use-ld" title="거짓말 탐지기(별 모양 안내·우측 하단 안내 패널)가 뜨면 알림">탐지기</label>
         <input type="checkbox" id="use-cpn"><label for="use-cpn" title="경험치 쿠폰(도핑) 효과가 끝났다는 화면 문구를 MP 검사 주기마다 확인">쿠폰</label>
+        <input type="checkbox" id="use-bst"><label for="use-bst" title="화면 위 가운데 '남은시간' 부스터 타이머가 사라지면(끝나면) 알림">부스터</label>
         <select id="rune-cd" title="룬이 사라진 뒤 다음 룬까지의 시간">
           <option value="10">10분</option>
           <option value="15">15분</option>
@@ -100,6 +103,7 @@
       <p class="status-bar-field" id="st-mp">MP 바 미지정</p>
       <p class="status-bar-field" id="st-rune">룬 -</p>
       <p class="status-bar-field" id="st-cpn">쿠폰 -</p>
+      <p class="status-bar-field" id="st-bst">부스터 -</p>
       <p class="status-bar-field" id="st-lie">탐지기 -</p>
       <p class="status-bar-field" id="st-res">-</p>
     </div>
@@ -167,6 +171,7 @@ function readConfig() {
     runeOn: q.get("rune") !== "0",
     cpnOn: q.get("cpn") !== "0",
     ldOn: q.get("ld") !== "0",
+    bstOn: q.get("bst") !== "0",
     rcd: RUNE_CDS.includes(Number(q.get("rcd"))) ? Number(q.get("rcd")) : 15
   };
 }
@@ -181,6 +186,7 @@ function writeConfig() {
   if (!cfg.runeOn) p.push("rune=0");
   if (!cfg.cpnOn) p.push("cpn=0");
   if (!cfg.ldOn) p.push("ld=0");
+  if (!cfg.bstOn) p.push("bst=0");
   history.replaceState(null, "", location.pathname + "?" + p.join("&") + location.hash);
 }
 
@@ -305,15 +311,21 @@ function detectTick() {
   updateUi();
 }
 
+function anyFeature() {
+  return cfg.mpOn || cfg.runeOn || cfg.cpnOn || cfg.ldOn || cfg.bstOn;
+}
+
 function setMonitoring(on) {
   monitoring = !!(on && hasFrame());
   setTicker(monitoring && (cfg.mpOn || cfg.cpnOn) ? cfg.iv : 0);
   setRuneTicker(monitoring && cfg.runeOn ? RUNE_IV : 0);
   setLieTicker(monitoring && cfg.ldOn ? LIE_IV : 0);
+  setBoosterTicker(monitoring && cfg.bstOn ? BST_QUICK_MS : 0);
   resetMp();
   resetRune();
   resetCoupon();
   resetLie();
+  resetBooster();
   const b = $("#btn-monitor");
   b.textContent = monitoring ? "감시 중지" : "감시 시작";
   b.classList.toggle("on", monitoring);
@@ -1218,6 +1230,8 @@ const BASE_H = 1080;
 
 let scaleCache = null;
 
+const SCALE_RECHECK_MS = 5e3;
+
 function titleBarHeight() {
   const W = video.videoWidth, H = Math.min(80, video.videoHeight);
   const {data: d} = cropFull({
@@ -1242,14 +1256,19 @@ function titleBarHeight() {
 }
 
 function uiScale() {
-  const W = video.videoWidth, H = video.videoHeight;
-  if (!scaleCache || scaleCache.W !== W || scaleCache.H !== H) {
-    let s = (H - titleBarHeight()) / BASE_H;
+  const W = video.videoWidth, H = video.videoHeight, now = performance.now();
+  const same = scaleCache && scaleCache.W === W && scaleCache.H === H;
+  if (!same || now - scaleCache.at >= SCALE_RECHECK_MS) {
+    const ts = [ ...same ? scaleCache.ts : [], titleBarHeight() ].slice(-3);
+    const t = [ ...ts ].sort((a, b) => a - b)[ts.length >> 1];
+    let s = (H - t) / BASE_H;
     if (Math.abs(s - 1) < .02) s = 1;
     scaleCache = {
       W: W,
       H: H,
-      s: s
+      s: s,
+      at: now,
+      ts: ts
     };
   }
   return scaleCache.s;
@@ -1519,6 +1538,267 @@ function updateLieUi() {
   st.textContent = lie.error ? "탐지기 오류: " + lie.error : !stream || !monitoring ? "탐지기 감시" + when : lie.visible ? `거짓말 탐지기 ${lie.kind}!${lie.muted ? " (알림 끔)" : ""}` : `탐지기 감시 중 (${lie.ms}ms)` + when;
 }
 
+const BST_T = {
+  w: 87,
+  h: 18,
+  b64: "AAAAQAA+AAAMAAA4AAxggD8AAgcwDH8ADjDgPQCBwz/HfwAHPHAYgMEBngMAgAM+OAzA4QDG+T7AAR4cB+BwAON9PuCAD/wBeDjA8D8c8PwBfAA8HHB4/w/4/wAIAD8OHpz/A/hzAADAOYcHzv8BADj8/3G4wwDH/wAADHpCAMABgMMfAPwPGAAA4ADAgQMA/gcMAABwwEAAAACHAwYAADhgAAAAgMMBBwAAAHAAAADA/4D/AAAA+A8AAOB/wP8AAAD8Dw=="
+};
+
+const isLightInk = (r, g, b) => {
+  const mn = Math.min(r, g, b);
+  return mn >= 120 && Math.max(r, g, b) - mn <= 50;
+};
+
+const BST_AREA = {
+  dx: [ -220, 20 ],
+  h: 260
+};
+
+const BST_RECALL = .8;
+
+const BST_NOISE = .15;
+
+const BST_IDLE_MS = 5e3;
+
+const BST_QUICK_MS = 1e3;
+
+const BST_AGREE_S = .7;
+
+const BST_ALARM_MS = 2e3;
+
+const BST_GONE_CHECKS = 2;
+
+const BST_NUM = {
+  x0: 95,
+  x1: 262,
+  dotFrom: 140,
+  dotTo: 215,
+  cw: 24,
+  ch: 42
+};
+
+const BST_INT_RIGHT = [ -11, -39 ];
+
+const BST_FRAC_LEFT = [ 11, 40 ];
+
+const SEG_BOX = [ [ 7, 16, 0, 2 ], [ 19, 21, 7, 15 ], [ 19, 21, 25, 33 ], [ 7, 16, 38, 40 ], [ 1, 3, 25, 33 ], [ 1, 3, 7, 15 ], [ 7, 16, 18, 22 ] ];
+
+const SEG_DIGIT = {
+  63: 0,
+  6: 1,
+  91: 2,
+  79: 3,
+  102: 4,
+  109: 5,
+  125: 6,
+  7: 7,
+  39: 7,
+  127: 8,
+  111: 9,
+  103: 9
+};
+
+const isLit = (r, g) => r >= 150 && g >= 110;
+
+const bst = {
+  on: false,
+  endAt: null,
+  endClock: null,
+  last: null,
+  unread: 0,
+  misses: 0,
+  at: null,
+  endedAt: null,
+  error: null
+};
+
+function resetBooster() {
+  Object.assign(bst, {
+    on: false,
+    endAt: null,
+    endClock: null,
+    last: null,
+    unread: 0,
+    misses: 0,
+    at: null,
+    error: null
+  });
+  hideAlarm("booster");
+}
+
+function findBooster() {
+  const k = uiScale(), W = video.videoWidth / k, H = video.videoHeight / k, {w: w, h: h} = BST_T;
+  const rx = Math.max(0, Math.round(W / 2 + BST_AREA.dx[0])), rw = Math.min(Math.floor(W) - rx, BST_AREA.dx[1] - BST_AREA.dx[0]);
+  const rh = Math.min(Math.floor(H), BST_AREA.h);
+  if (rw < w || rh < h) return null;
+  const fr = cropScaled({
+    x: rx * k,
+    y: 0,
+    w: rw * k,
+    h: rh * k
+  }, k);
+  const p = matchTemplate(inkMask(fr, isLightInk), BST_T, BST_RECALL, BST_NOISE);
+  return p && {
+    lx: rx + p.x,
+    ly: p.y,
+    k: k,
+    W: W,
+    H: H,
+    box: {
+      x: Math.round((rx + p.x) * k),
+      y: Math.round(p.y * k),
+      w: Math.round(w * k),
+      h: Math.round(h * k)
+    }
+  };
+}
+
+function readBoosterSecs(f) {
+  const {lx: lx, ly: ly, k: k, W: W, H: H} = f, {x0: x0, x1: x1, dotFrom: dotFrom, dotTo: dotTo, cw: cw, ch: ch} = BST_NUM;
+  const cx = lx + x0, cy = ly - 6, w = Math.min(x1 - x0, Math.floor(W) - cx), h = ch + 18;
+  if (w < x1 - x0 || cy < 0 || cy + h > H) return null;
+  const {W: fw, data: data} = cropScaled({
+    x: cx * k,
+    y: cy * k,
+    w: w * k,
+    h: h * k
+  }, k);
+  const fh = data.length / 4 / fw;
+  let top = 0;
+  const lit = (x, y) => {
+    const i = ((y + top) * fw + x) * 4;
+    return isLit(data[i], data[i + 1]);
+  };
+  const litFrac = (xa, xb, ya, yb) => {
+    let n = 0, c = 0;
+    for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) {
+      if (x < 0 || x >= fw || y + top < 0 || y + top >= fh) return -1;
+      n++;
+      c += lit(x, y);
+    }
+    return c / n;
+  };
+  let dot = -1;
+  for (let x = dotFrom - x0, run = 0; x <= dotTo - x0; x++) {
+    const ok = litFrac(x, x, 36, 50) >= .2 && litFrac(x, x, 10, 30) === 0;
+    if (ok) run++; else {
+      if (run >= 4 && run <= 9) {
+        dot = x - run;
+        break;
+      }
+      run = 0;
+    }
+  }
+  if (dot < 0) return null;
+  let bottom = -1;
+  for (let y = 36; y <= 50; y++) if (litFrac(dot, dot + 3, y, y) > 0) bottom = y;
+  top = bottom - (ch - 1);
+  const digitAt = left => {
+    let code = 0;
+    for (let s = 0; s < 7; s++) {
+      const [a, b, c, d] = SEG_BOX[s], v = litFrac(left + a, left + b, c, d);
+      if (v < 0 || v > .2 && v < .5) return null;
+      if (v >= .5) code |= 1 << s;
+    }
+    return code === 0 ? -1 : SEG_DIGIT[code] ?? null;
+  };
+  let secs = 0, place = 1;
+  for (let i = 0; i < BST_INT_RIGHT.length; i++) {
+    const d = digitAt(dot + BST_INT_RIGHT[i] - cw + 1);
+    if (d == null) return null;
+    if (d < 0) {
+      if (i === 0) return null;
+      break;
+    }
+    secs += d * place;
+    place *= 10;
+  }
+  for (let i = 0; i < BST_FRAC_LEFT.length; i++) {
+    const d = digitAt(dot + BST_FRAC_LEFT[i]);
+    if (d == null || d < 0) return null;
+    secs += d / 10 ** (i + 1);
+  }
+  return secs;
+}
+
+function boosterEnded() {
+  Object.assign(bst, {
+    on: false,
+    endAt: null,
+    endClock: null,
+    last: null,
+    unread: 0,
+    misses: 0
+  });
+  bst.endedAt = Date.now();
+  boosterBeep();
+  flashTitle("부스터 끝", 3);
+  showAlarm("booster", "부스터(남은시간)가 끝났습니다.");
+  setTimeout(() => hideAlarm("booster"), BST_ALARM_MS);
+}
+
+function boosterTick() {
+  if (!monitoring || !cfg.bstOn || !hasFrame()) {
+    updateUi();
+    return;
+  }
+  const now = performance.now();
+  let f, v = null;
+  try {
+    f = findBooster();
+    v = f && readBoosterSecs(f);
+    bst.error = null;
+  } catch (e) {
+    bst.error = e.message;
+    updateUi();
+    return;
+  }
+  bst.at = f && f.box;
+  let next = BST_IDLE_MS;
+  if (f && v != null && v < 1 && bst.endAt) boosterEnded(); else if (f && (v == null || v >= 1)) {
+    bst.misses = 0;
+    if (v != null) {
+      const l = bst.last;
+      if (l && Math.abs(l.v - (now - l.t) / 1e3 - v) <= BST_AGREE_S) {
+        bst.endAt = now + v * 1e3;
+        bst.endClock = Date.now() + v * 1e3;
+      }
+      bst.last = {
+        v: v,
+        t: now
+      };
+      bst.unread = 0;
+    } else bst.unread++;
+    const justEnded = bst.endedAt && Date.now() - bst.endedAt < 3e4;
+    if (!bst.on && (v != null || bst.unread >= 3 && !justEnded)) {
+      bst.on = true;
+      hideAlarm("booster");
+    }
+    if (bst.endAt && bst.endAt > now) next = Math.max(BST_QUICK_MS, bst.endAt - now); else if (v != null || bst.unread < 3) next = BST_QUICK_MS;
+  } else if (bst.on && !f) {
+    if (bst.endAt && now >= bst.endAt - 1500 || ++bst.misses >= BST_GONE_CHECKS) boosterEnded(); else next = BST_QUICK_MS;
+  }
+  setBoosterTicker(next);
+  updateUi();
+}
+
+const setBoosterTicker = workerTimer(boosterTick);
+
+function updateBoosterUi() {
+  const st = $("#st-bst");
+  st.hidden = !cfg.bstOn;
+  st.classList.toggle("alert", alarmKind === "booster");
+  const when = bst.endedAt ? ` · 끝 ${new Date(bst.endedAt).toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  })}` : "";
+  st.textContent = bst.error ? "부스터 오류: " + bst.error : !stream || !monitoring ? "부스터 감시" + when : bst.endClock ? `부스터 켜짐 · ${new Date(bst.endClock).toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  })} 끝 예정` : bst.on ? "부스터 켜짐" : "부스터 없음" + when;
+}
+
 function ensureAudio() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext);
   if (audioCtx.state === "suspended") audioCtx.resume();
@@ -1578,6 +1858,24 @@ function couponBeep() {
   });
 }
 
+function boosterBeep() {
+  ensureAudio();
+  const t0 = audioCtx.currentTime + .02;
+  const vol = Math.max(2e-4, cfg.vol * .35);
+  [ 0, .4, .8, 1.2, 1.6 ].forEach(d => [ [ 0, 784 ], [ .12, 1047 ] ].forEach(([dt, f]) => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.value = f;
+    const t = t0 + d + dt;
+    g.gain.setValueAtTime(1e-4, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + .02);
+    g.gain.exponentialRampToValueAtTime(1e-4, t + .11);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t);
+    o.stop(t + .12);
+  }));
+}
+
 function lieBeep() {
   ensureAudio();
   const t0 = audioCtx.currentTime + .02;
@@ -1598,13 +1896,13 @@ let titleTimer = null;
 
 const baseTitle = document.title;
 
-function flashTitle(msg) {
+function flashTitle(msg, times = 12) {
   clearInterval(titleTimer);
   let on = false, n = 0;
   titleTimer = setInterval(() => {
     on = !on;
     document.title = on ? "🔔 " + msg : baseTitle;
-    if (++n > 12) {
+    if (++n > times) {
       clearInterval(titleTimer);
       document.title = baseTitle;
     }
@@ -1656,6 +1954,7 @@ function closeAlarm() {
     return hideAlarm("lie");
   }
   if (alarmKind === "coupon") return hideAlarm("coupon");
+  if (alarmKind === "booster") return hideAlarm("booster");
   if (alarmKind !== "rune") return hideAlarm("mp");
   rune.muted = true;
   hideAlarm("rune");
@@ -1670,9 +1969,10 @@ function setMain(text) {
 }
 
 function updateUi() {
-  $("#btn-monitor").disabled = !stream || !cfg.mpOn && !cfg.runeOn && !cfg.cpnOn && !cfg.ldOn;
+  $("#btn-monitor").disabled = !stream || !anyFeature();
   updateCouponUi();
   updateLieUi();
+  updateBoosterUi();
   updateRuneUi();
   $("#btn-auto").hidden = !cfg.mp;
   const size = hasFrame() ? [ video.videoWidth, video.videoHeight ] : null;
@@ -1754,6 +2054,7 @@ function render(ts) {
     if (rune.at) box(rune.at, "#ff00ff", "", lw * 3);
   }
   if (monitoring && cfg.cpnOn && cpn.at) box(cpn.at, "#ffa500", "쿠폰 종료", lw);
+  if (monitoring && cfg.bstOn && bst.at) box(bst.at, "#00c0ff", "부스터", lw);
   if (monitoring && cfg.ldOn && lie.at) box(lie.at, "#ff0000", "거짓말 탐지기 " + lie.kind, lw * 2);
   const r = cfg.mpOn ? mpRegion() : null;
   if (r) {
@@ -1847,7 +2148,7 @@ intervalSel.addEventListener("change", () => {
   if (monitoring) setTicker(cfg.iv);
 });
 
-const useMp = $("#use-mp"), useRune = $("#use-rune"), useCpn = $("#use-cpn"), useLd = $("#use-ld"), runeCd = $("#rune-cd");
+const useMp = $("#use-mp"), useRune = $("#use-rune"), useCpn = $("#use-cpn"), useLd = $("#use-ld"), useBst = $("#use-bst"), runeCd = $("#rune-cd");
 
 useMp.checked = cfg.mpOn;
 
@@ -1857,6 +2158,8 @@ useCpn.checked = cfg.cpnOn;
 
 useLd.checked = cfg.ldOn;
 
+useBst.checked = cfg.bstOn;
+
 runeCd.value = String(cfg.rcd);
 
 function onFeatureChange() {
@@ -1864,14 +2167,17 @@ function onFeatureChange() {
   cfg.runeOn = useRune.checked;
   cfg.cpnOn = useCpn.checked;
   cfg.ldOn = useLd.checked;
+  cfg.bstOn = useBst.checked;
   writeConfig();
   if (!cfg.mpOn) autoMp = null;
-  setMonitoring(monitoring && (cfg.mpOn || cfg.runeOn || cfg.cpnOn || cfg.ldOn));
+  setMonitoring(monitoring && anyFeature());
 }
 
 useCpn.addEventListener("change", onFeatureChange);
 
 useLd.addEventListener("change", onFeatureChange);
+
+useBst.addEventListener("change", onFeatureChange);
 
 useMp.addEventListener("change", onFeatureChange);
 
