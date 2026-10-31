@@ -849,6 +849,8 @@ const RUNE_MIN = 7, RUNE_MAX = 26;
 
 const RUNE_SYM = .6;
 
+const RUNE_UNIFORM = .45;
+
 const runePurple = (r, g, b) => {
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
   if (mx < 140 || mx - mn < 60 || g !== mn) return false;
@@ -913,13 +915,52 @@ function runeShape(bl, W) {
   return sym >= RUNE_SYM ? sym : 0;
 }
 
+function modeColor(pts, data) {
+  const hist = new Map;
+  for (const p of pts) {
+    const i = p * 4, k = data[i] >> 4 << 8 | data[i + 1] >> 4 << 4 | data[i + 2] >> 4;
+    hist.set(k, (hist.get(k) || 0) + 1);
+  }
+  let mode = 0, cnt = -1;
+  for (const [k, c] of hist) if (c > cnt) {
+    mode = k;
+    cnt = c;
+  }
+  let r = 0, g = 0, b = 0, n = 0;
+  for (const p of pts) {
+    const i = p * 4;
+    if ((data[i] >> 4 << 8 | data[i + 1] >> 4 << 4 | data[i + 2] >> 4) === mode) {
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+      n++;
+    }
+  }
+  return {
+    r: r / n,
+    g: g / n,
+    b: b / n
+  };
+}
+
+function blobUniform(pts, data) {
+  const c = modeColor(pts, data);
+  let k = 0;
+  for (const p of pts) {
+    const i = p * 4;
+    if (Math.abs(data[i] - c.r) + Math.abs(data[i + 1] - c.g) + Math.abs(data[i + 2] - c.b) <= 45) k++;
+  }
+  return k / pts.length;
+}
+
 function findRune(fr) {
   const {W: W, H: H, data: data} = fr;
   const m = new Uint8Array(W * H);
   for (let i = 0, p = 0; p < W * H; p++, i += 4) m[p] = runePurple(data[i], data[i + 1], data[i + 2]) ? 1 : 0;
   let best = null;
   const consider = bl => {
-    const sym = runeShape(bl, W);
+    let sym = runeShape(bl, W);
+    if (sym && blobUniform(bl.pts, data) < RUNE_UNIFORM) sym = 0;
     if (sym && (!best || sym > best.sym)) best = {
       sym: sym,
       box: {
@@ -934,29 +975,7 @@ function findRune(fr) {
   const sub = new Uint8Array(W * H);
   for (const bl of runeBlobs(m, W, H)) {
     if (consider(bl) || bl.pts.length < 20 || bl.pts.length > 1500) continue;
-    const hist = new Map;
-    for (const p of bl.pts) {
-      const i = p * 4, k = data[i] >> 4 << 8 | data[i + 1] >> 4 << 4 | data[i + 2] >> 4;
-      hist.set(k, (hist.get(k) || 0) + 1);
-    }
-    let mode = 0, cnt = -1;
-    for (const [k, c] of hist) if (c > cnt) {
-      mode = k;
-      cnt = c;
-    }
-    let sr = 0, sg = 0, sb = 0, sn = 0;
-    for (const p of bl.pts) {
-      const i = p * 4;
-      if ((data[i] >> 4 << 8 | data[i + 1] >> 4 << 4 | data[i + 2] >> 4) === mode) {
-        sr += data[i];
-        sg += data[i + 1];
-        sb += data[i + 2];
-        sn++;
-      }
-    }
-    sr /= sn;
-    sg /= sn;
-    sb /= sn;
+    const {r: sr, g: sg, b: sb} = modeColor(bl.pts, data);
     for (const p of bl.pts) {
       const i = p * 4;
       sub[p] = Math.abs(data[i] - sr) + Math.abs(data[i + 1] - sg) + Math.abs(data[i + 2] - sb) <= 60 ? 1 : 0;
