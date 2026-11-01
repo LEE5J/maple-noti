@@ -267,6 +267,7 @@ function stopCapture() {
   autoMp = null;
   runeMap = null;
   scaleCache = null;
+  scaleBar = null;
   $("#placeholder").hidden = false;
   pv.hidden = true;
   $("#btn-capture").textContent = "화면 공유";
@@ -849,6 +850,8 @@ const RUNE_MIN = 7, RUNE_MAX = 26;
 
 const RUNE_SYM = .6;
 
+const RUNE_COLOR = [ 217, 105, 248 ], RUNE_COLOR_DIFF = 70;
+
 const RUNE_UNIFORM = .45;
 
 const runePurple = (r, g, b) => {
@@ -960,7 +963,10 @@ function findRune(fr) {
   let best = null;
   const consider = bl => {
     let sym = runeShape(bl, W);
-    if (sym && blobUniform(bl.pts, data) < RUNE_UNIFORM) sym = 0;
+    if (sym) {
+      const c = modeColor(bl.pts, data);
+      if (Math.abs(c.r - RUNE_COLOR[0]) + Math.abs(c.g - RUNE_COLOR[1]) + Math.abs(c.b - RUNE_COLOR[2]) > RUNE_COLOR_DIFF || blobUniform(bl.pts, data) < RUNE_UNIFORM) sym = 0;
+    }
     if (sym && (!best || sym > best.sym)) best = {
       sym: sym,
       box: {
@@ -1280,17 +1286,131 @@ function uiScale() {
   if (!same || now - scaleCache.at >= SCALE_RECHECK_MS) {
     const ts = [ ...same ? scaleCache.ts : [], titleBarHeight() ].slice(-3);
     const t = [ ...ts ].sort((a, b) => a - b)[ts.length >> 1];
-    let s = (H - t) / BASE_H;
+    const box = gameExtent(t);
+    let s = (box.h - t) / BASE_H;
     if (Math.abs(s - 1) < .02) s = 1;
     scaleCache = {
       W: W,
       H: H,
       s: s,
       at: now,
-      ts: ts
+      ts: ts,
+      box: box
     };
   }
   return scaleCache.s;
+}
+
+const MARGIN_SPREAD = 36;
+
+const MP_TO_BOTTOM = 25;
+
+let scaleBar = null;
+
+function mpBarForScale() {
+  const size = `${video.videoWidth}x${video.videoHeight}`;
+  if (autoMp && autoMp.size === size) return autoMp;
+  if (!scaleBar || scaleBar.size !== size || !scaleBar.bar && performance.now() - scaleBar.at > 3e4) {
+    const b = findMpBar(grabFrame())[0];
+    scaleBar = {
+      size: size,
+      at: performance.now(),
+      bar: b && b.hp >= .2 ? {
+        x: b.x,
+        y: b.y,
+        w: b.w,
+        h: b.h
+      } : null
+    };
+  }
+  return scaleBar.bar;
+}
+
+function gameExtent(t) {
+  const W = video.videoWidth, H = video.videoHeight, q = 4;
+  const {W: w, H: h, data: d} = cropScaled({
+    x: 0,
+    y: 0,
+    w: W,
+    h: H
+  }, q);
+  const flat = (data, idx, n) => {
+    let r0 = 255, r1 = 0, g0 = 255, g1 = 0, b0 = 255, b1 = 0;
+    for (let k = 0; k < n; k++) {
+      const i = idx(k), r = data[i], g = data[i + 1], b = data[i + 2];
+      if (r < r0) r0 = r;
+      if (r > r1) r1 = r;
+      if (g < g0) g0 = g;
+      if (g > g1) g1 = g;
+      if (b < b0) b0 = b;
+      if (b > b1) b1 = b;
+      if (r1 - r0 + g1 - g0 + b1 - b0 > MARGIN_SPREAD) return false;
+    }
+    return true;
+  };
+  let yb = h;
+  while (yb > 0 && flat(d, k => ((yb - 1) * w + k + 1) * 4, w - 2)) yb--;
+  let y1 = H;
+  if (yb < h) {
+    const ya = Math.max(0, (yb - 2) * q), r = cropFull({
+      x: 0,
+      y: ya,
+      w: W,
+      h: Math.min(H, (yb + 2) * q) - ya
+    });
+    y1 = ya + r.H;
+    while (y1 > ya && flat(r.data, k => ((y1 - 1 - ya) * W + k + 3) * 4, W - 6)) y1--;
+  }
+  if (H - y1 < H * .02 || y1 < H * .4) y1 = H;
+  if (y1 === H) {
+    const bar = mpBarForScale();
+    if (bar) {
+      const bb = bar.y + bar.h, est = Math.round(bb + MP_TO_BOTTOM * (bb - t) / (BASE_H - MP_TO_BOTTOM));
+      if (H - est > Math.max(20, H * .03) && est > H * .3) y1 = est;
+    }
+  }
+  const ty = Math.ceil(t / q), by = Math.max(ty + 1, Math.floor(y1 / q));
+  const near = (i, j) => Math.abs(d[i] - d[j]) + Math.abs(d[i + 1] - d[j + 1]) + Math.abs(d[i + 2] - d[j + 2]) <= MARGIN_SPREAD;
+  const colFlat = (x, ya = ty, yb = by) => {
+    const n = yb - ya, at = k => ((ya + k) * w + x) * 4;
+    const s = [ at(n >> 2), at(n >> 1), at(n * 3 >> 2) ];
+    const ref = near(s[0], s[1]) || near(s[0], s[2]) ? s[0] : near(s[1], s[2]) ? s[1] : -1;
+    if (ref < 0) return false;
+    let bad = 0, allow = Math.floor(n * .03);
+    for (let k = 0; k < n; k++) if (!near(at(k), ref) && ++bad > allow) return false;
+    return true;
+  };
+  let xa = 1;
+  while (xa < w && colFlat(xa)) xa++;
+  let xb = w - 1;
+  while (xb > xa && colFlat(xb - 1)) xb--;
+  const band = 4, tA = ty, tB = Math.min(by, ty + band), bA = Math.max(ty, by - band), bB = by;
+  const edgeRun = (from, step, until) => {
+    const refT = ((tA + 1) * w + from) * 4, refB = ((bA + 1) * w + from) * 4;
+    if (!near(refT, refB)) return from;
+    let x = from;
+    while (x !== until && colFlat(x, tA, tB) && colFlat(x, bA, bB) && near(((tA + 1) * w + x) * 4, refT)) x += step;
+    return x;
+  };
+  xa = Math.max(xa, edgeRun(1, 1, w - 1));
+  xb = Math.min(xb, edgeRun(w - 2, -1, xa) + 1);
+  let x0 = xa * q, x1 = xb * q;
+  if (xa <= 1 || x0 < W * .02) x0 = 0;
+  if (xb >= w - 1 || W - x1 < W * .02) x1 = W;
+  if (x1 - x0 < W * .4) {
+    x0 = 0;
+    x1 = W;
+  }
+  return {
+    x: x0,
+    w: x1 - x0,
+    h: y1
+  };
+}
+
+function gameBox() {
+  uiScale();
+  return scaleCache.box;
 }
 
 function cropScaled(r, s) {
@@ -1340,19 +1460,19 @@ function resetCoupon() {
 }
 
 function findCoupon() {
-  const k = uiScale(), W = video.videoWidth / k, H = video.videoHeight / k, {w: w, h: h} = CPN_T;
+  const k = uiScale(), g = gameBox(), ox = g.x / k, W = g.w / k, H = g.h / k, {w: w, h: h} = CPN_T;
   const rx = Math.max(0, Math.round(W / 2 - w / 2 - CPN_DX)), ry = Math.round(H * CPN_Y[0]);
   const rw = Math.min(Math.floor(W) - rx, w + CPN_DX * 2), rh = Math.min(Math.floor(H) - ry, Math.round(H * (CPN_Y[1] - CPN_Y[0])) + h);
   if (rw < w || rh < h) return null;
   const fr = cropScaled({
-    x: rx * k,
+    x: (ox + rx) * k,
     y: ry * k,
     w: rw * k,
     h: rh * k
   }, k);
   const p = matchTemplate(inkMask(fr, isWhiteInk), CPN_T, CPN_RECALL, CPN_NOISE);
   return p && {
-    x: Math.round((rx + p.x) * k),
+    x: Math.round((ox + rx + p.x) * k),
     y: Math.round((ry + p.y) * k),
     w: Math.round(w * k),
     h: Math.round(h * k)
@@ -1471,15 +1591,15 @@ function resetLie() {
 }
 
 function findLie() {
-  const k = uiScale();
+  const k = uiScale(), g = gameBox();
   const full = cropScaled({
-    x: 0,
+    x: g.x,
     y: 0,
-    w: video.videoWidth,
-    h: video.videoHeight
+    w: g.w,
+    h: g.h
   }, k);
   const W = full.W, H = full.H, box = (x, y, t) => ({
-    x: Math.round(x * k),
+    x: g.x + Math.round(x * k),
     y: Math.round(y * k),
     w: Math.round(t.w * k),
     h: Math.round(t.h * k)
@@ -1646,25 +1766,25 @@ function resetBooster() {
 }
 
 function findBooster() {
-  const k = uiScale(), W = video.videoWidth / k, H = video.videoHeight / k, {w: w, h: h} = BST_T;
+  const k = uiScale(), g = gameBox(), ox = g.x / k, W = g.w / k, H = g.h / k, {w: w, h: h} = BST_T;
   const rx = Math.max(0, Math.round(W / 2 + BST_AREA.dx[0])), rw = Math.min(Math.floor(W) - rx, BST_AREA.dx[1] - BST_AREA.dx[0]);
   const rh = Math.min(Math.floor(H), BST_AREA.h);
   if (rw < w || rh < h) return null;
   const fr = cropScaled({
-    x: rx * k,
+    x: (ox + rx) * k,
     y: 0,
     w: rw * k,
     h: rh * k
   }, k);
   const p = matchTemplate(inkMask(fr, isLightInk), BST_T, BST_RECALL, BST_NOISE);
   return p && {
-    lx: rx + p.x,
+    lx: ox + rx + p.x,
     ly: p.y,
     k: k,
-    W: W,
+    W: ox + W,
     H: H,
     box: {
-      x: Math.round((rx + p.x) * k),
+      x: Math.round((ox + rx + p.x) * k),
       y: Math.round(p.y * k),
       w: Math.round(w * k),
       h: Math.round(h * k)
@@ -2244,6 +2364,29 @@ if (!navigator.mediaDevices?.getDisplayMedia) {
 writeConfig();
 
 updateUi();
+</script>
+<script>
+(() => {
+  const m = location.pathname.match(/^(.*\/)v(\d+(?:\.\d+)+)\/(?:index\.html)?$/);
+  const root = m ? m[1] : location.pathname.replace(/[^/]*$/, "");
+  fetch(root + "versions.json", {
+    cache: "no-cache"
+  }).then(r => r.ok ? r.json() : null).then(info => {
+    if (!info || !Array.isArray(info.versions) || !info.versions.length) return;
+    const cur = m ? m[2] : info.latest;
+    const sel = document.createElement("select");
+    sel.id = "version-pick";
+    sel.title = "버전 선택";
+    sel.style.cssText = "margin-left:auto;margin-right:6px;height:18px;padding:0 18px 0 4px;font-size:11px;line-height:16px";
+    for (const v of info.versions) sel.add(new Option(v === info.latest ? `v${v} (최신)` : `v${v}`, v, false, v === cur));
+    sel.onchange = () => {
+      const v = sel.value;
+      location.href = (v === info.latest ? root : `${root}v${v}/`) + location.search + location.hash;
+    };
+    const bar = document.querySelector(".title-bar");
+    if (bar) bar.insertBefore(sel, bar.querySelector(".title-bar-controls"));
+  }).catch(() => {});
+})();
 </script>
 </body>
 </html>
