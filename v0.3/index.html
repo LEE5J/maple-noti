@@ -1706,6 +1706,14 @@ const BST_T = {
   b64: "AAAAQAA+AAAMAAA4AAxggD8AAgcwDH8ADjDgPQCBwz/HfwAHPHAYgMEBngMAgAM+OAzA4QDG+T7AAR4cB+BwAON9PuCAD/wBeDjA8D8c8PwBfAA8HHB4/w/4/wAIAD8OHpz/A/hzAADAOYcHzv8BADj8/3G4wwDH/wAADHpCAMABgMMfAPwPGAAA4ADAgQMA/gcMAABwwEAAAACHAwYAADhgAAAAgMMBBwAAAHAAAADA/4D/AAAA+A8AAOB/wP8AAAD8Dw=="
 };
 
+const BST_T2 = {
+  w: 36,
+  h: 26,
+  dx: 238,
+  dy: 24,
+  b64: "AAAAAAEAAAAQAAAAAAEAAAAQABgAAAHAAwAQgP8BAAH4HwAQADwAAAHAAwAQAH4AAAFwDgAQgMcBAAEIEQAQABgAAAHAAwAQ4P8HAAH//wAQAAAAAAEAAAAQAAAAAAEAAAAQAAAAAAEAAAAQAAAAAAAAAAAA"
+};
+
 const isLightInk = (r, g, b) => {
   const mn = Math.min(r, g, b);
   return mn >= 120 && Math.max(r, g, b) - mn <= 50;
@@ -1719,6 +1727,10 @@ const BST_AREA = {
 const BST_RECALL = .8;
 
 const BST_NOISE = .15;
+
+const BST_RECALL2 = [ .6, .8 ], BST_NOISE2 = .1;
+
+const BST_NEAR = 6;
 
 const BST_IDLE_MS = 5e3;
 
@@ -1770,6 +1782,7 @@ const bst = {
   unread: 0,
   misses: 0,
   at: null,
+  pos: null,
   endedAt: null,
   error: null
 };
@@ -1783,16 +1796,31 @@ function resetBooster() {
     unread: 0,
     misses: 0,
     at: null,
+    pos: null,
     error: null
   });
   hideAlarm("booster");
 }
 
-function findBooster() {
+function findBooster(near) {
   const k = uiScale(), g = gameBox(), ox = g.x / k, W = g.w / k, H = g.h / k, {w: w, h: h} = BST_T;
   const rx = Math.max(0, Math.round(W / 2 + BST_AREA.dx[0])), rw = Math.min(Math.floor(W) - rx, BST_AREA.dx[1] - BST_AREA.dx[0]);
   const rh = Math.min(Math.floor(H), BST_AREA.h);
   if (rw < w || rh < h) return null;
+  const at = (lx, ly, by2) => ({
+    lx: lx,
+    ly: ly,
+    k: k,
+    W: ox + W,
+    H: H,
+    by2: by2,
+    box: {
+      x: Math.round(lx * k),
+      y: Math.round(ly * k),
+      w: Math.round(w * k),
+      h: Math.round(h * k)
+    }
+  });
   const fr = cropScaled({
     x: (ox + rx) * k,
     y: 0,
@@ -1800,19 +1828,19 @@ function findBooster() {
     h: rh * k
   }, k);
   const p = matchTemplate(inkMask(fr, isLightInk), BST_T, BST_RECALL, BST_NOISE);
-  return p && {
-    lx: ox + rx + p.x,
-    ly: p.y,
-    k: k,
-    W: ox + W,
-    H: H,
-    box: {
-      x: Math.round((ox + rx + p.x) * k),
-      y: Math.round(p.y * k),
-      w: Math.round(w * k),
-      h: Math.round(h * k)
-    }
-  };
+  if (p) return at(ox + rx + p.x, p.y, false);
+  const {dx: dx, dy: dy} = BST_T2, pad = near ? BST_NEAR : 0;
+  const x2 = near ? Math.round(near.lx) + dx - pad : ox + rx + dx, y2 = near ? Math.round(near.ly) + dy - pad : dy;
+  const w2 = Math.min(Math.floor(ox + W) - x2, near ? BST_T2.w + 2 * pad : rw + BST_T2.w), h2 = Math.min(Math.floor(H) - y2, near ? BST_T2.h + 2 * pad : rh + BST_T2.h);
+  if (x2 < 0 || y2 < 0 || w2 < BST_T2.w || h2 < BST_T2.h) return null;
+  const fr2 = cropScaled({
+    x: x2 * k,
+    y: y2 * k,
+    w: w2 * k,
+    h: h2 * k
+  }, k);
+  const q = matchTemplate(inkMask(fr2, isLightInk), BST_T2, BST_RECALL2[near ? 0 : 1], BST_NOISE2, near ? null : q => readBoosterSecs(at(x2 - dx + q.x, y2 - dy + q.y, true)) != null);
+  return q && at(x2 - dx + q.x, y2 - dy + q.y, true);
 }
 
 function readBoosterSecs(f) {
@@ -1908,7 +1936,7 @@ function boosterTick() {
   const now = performance.now();
   let f, v = null;
   try {
-    f = findBooster();
+    f = findBooster(bst.on ? bst.pos : null);
     v = f && readBoosterSecs(f);
     bst.error = null;
   } catch (e) {
@@ -1917,6 +1945,10 @@ function boosterTick() {
     return;
   }
   bst.at = f && f.box;
+  if (f) bst.pos = {
+    lx: f.lx,
+    ly: f.ly
+  };
   let next = BST_IDLE_MS;
   if (f && v != null && v < 1 && bst.endAt) boosterEnded(); else if (f && (v == null || v >= 1)) {
     bst.misses = 0;
@@ -1939,7 +1971,7 @@ function boosterTick() {
     }
     if (bst.endAt && bst.endAt > now) next = Math.max(BST_QUICK_MS, bst.endAt - now); else if (v != null || bst.unread < 3) next = BST_QUICK_MS;
   } else if (bst.on && !f) {
-    if (bst.endAt && now >= bst.endAt - 1500 || ++bst.misses >= BST_GONE_CHECKS) boosterEnded(); else next = BST_QUICK_MS;
+    if (++bst.misses >= BST_GONE_CHECKS) boosterEnded(); else next = BST_QUICK_MS;
   }
   setBoosterTicker(next);
   updateUi();
