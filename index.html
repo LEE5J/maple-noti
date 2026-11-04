@@ -75,6 +75,7 @@
         <button id="btn-capture">화면 공유</button>
         <button id="btn-monitor" disabled>감시 시작</button>
         <button id="btn-auto" hidden title="직접 지정한 MP 영역을 지우고 자동 인식으로 돌아갑니다">자동 인식으로</button>
+        <button id="btn-remap" hidden disabled title="맵을 옮겨 미니맵 위치·크기가 바뀌었을 때 미니맵을 다시 찾습니다">미니맵 다시 찾기</button>
       </div>
       <div class="sep"></div>
       <div class="group">
@@ -2178,6 +2179,8 @@ function updateMainUi() {
   updateBoosterUi();
   updateRuneUi();
   $("#btn-auto").hidden = !cfg.mp;
+  $("#btn-remap").hidden = !cfg.runeOn;
+  $("#btn-remap").disabled = !stream;
   const size = hasFrame() ? [ video.videoWidth, video.videoHeight ] : null;
   $("#st-res").textContent = size ? `${size[0]}×${size[1]}` : "-";
   const r = mpRegion();
@@ -2338,6 +2341,12 @@ $("#btn-auto").addEventListener("click", () => {
   writeConfig();
   autoMp = null;
   resetMp();
+  updateUi();
+});
+
+$("#btn-remap").addEventListener("click", () => {
+  runeMap = null;
+  resetRune();
   updateUi();
 });
 
